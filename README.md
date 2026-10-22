@@ -6,7 +6,7 @@ The goal is to let users delegate bounded browser tasks, inspect the resulting e
 
 ## Current status
 
-**Early development: BATCH-00 bootstrap. This is not yet a usable browser or an autonomous browsing agent.**
+**Early development: bootstrap plus B01 core primitives (B01 awaiting review). This is not yet a usable browser or an autonomous browsing agent.**
 
 Implemented:
 
@@ -14,6 +14,7 @@ Implemented:
 - An `aero` CLI with help, version information, and a `doctor` command.
 - Bounded executable/version probes and comparison against a recorded development browser byte pin.
 - Bootstrap tests, requirements traceability, architecture decisions, and contributor documentation.
+- Distinct string identifiers, clipped CSS geometry, and separate frame-local/root-CSS/screenshot coordinate types, with unit and compile-fail tests.
 
 Not implemented yet: browser process supervision and CDP transport, task execution, permission enforcement, durable task storage/recovery, model-provider integration, or a desktop interface. The library crates establish boundaries; their presence does not mean those subsystems work.
 

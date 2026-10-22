@@ -1,6 +1,6 @@
 # Contributing to AeroBrowser
 
-Status: BATCH-00 bootstrap, 2026-10-22. The user approved committing and pushing the reviewed baseline; root commit 5a4fac91e5638735aa1cd762c183f63c9efa39de contains the six-crate workspace, tested readiness diagnostics and documentation. Local main is linked to the private GitHub repository; verify current remote delivery from Git rather than this static snapshot. Browser execution, task/control/policy/store and native sandbox qualification remain future work. Later batches still require review and explicit commit/push approval.
+Status: B01 pure primitives ready for review, uncommitted, 2026-10-22; see the [current handoff](docs/handoff.md#current-b01-checkpoint). The user approved committing and pushing the earlier bootstrap/README, not B01. Local main is linked to the private GitHub repository; verify current remote delivery from Git rather than this static snapshot. Browser execution, task/control/policy/store and native sandbox qualification remain future work. Every later batch still requires review and explicit commit/push approval.
 
 ## 1. Read first and respect document authority
 
@@ -42,7 +42,7 @@ cargo test -p aero-core center_uses_visible_intersection -- --nocapture
 cargo test -p aero-core
 ```
 
-Expected red: the named test executes and its visible-intersection assertion fails. Expected green: the named test executes once and passes; the core suite exits 0. Those are expected future outputs, not observed results. Add an overflow/nonfinite derived-geometry case before using geometry for actual input.
+Expected red: the named test executes and its visible-intersection assertion fails. Expected green: the named test executes once and passes; the core suite exits 0. Those were the prescribed red/green assertions; B01 has now exercised them, plus overflow/nonfinite and strict-interior rounding regressions. See the handoff for observed commands/results. They do not establish safe actual browser input.
 
 ## 4. Architecture constraints
 

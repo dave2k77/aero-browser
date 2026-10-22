@@ -1,6 +1,6 @@
 # AeroBrowser — bug, fix, blocker, and decision tracker
 
-Updated for BATCH-00 on 2026-10-22. This remains the authoritative local issue register. Local main is linked to private dave2k77/aero-browser; the user approved the reviewed bootstrap commit/push, and root commit 5a4fac91e5638735aa1cd762c183f63c9efa39de now exists. Hosted issue migration, later batch commits, public release and private-evidence publication are not approved. Verify actual remote delivery separately.
+Updated for B01 review on 2026-10-22. This remains the authoritative local issue register. Local main is linked to private dave2k77/aero-browser; bootstrap and README were separately approved and committed. B01 primitives are ready for review, uncommitted; see the [current evidence record](handoff.md#current-b01-checkpoint). Hosted issue migration, B01/later batch commits, public release and private-evidence publication are not approved. Verify actual remote delivery separately.
 
 Read [the specification](specification.md), [implementation plan](implementation-plan.md), [handoff](handoff.md), and [contribution rules](../CONTRIBUTING.md). Bootstrap code and prerequisite diagnostics now exist. Deliberate TDD red states, missing setup and untested platform assumptions are not disguised as production defects or completed fixes.
 
@@ -57,7 +57,7 @@ For an environment issue, close only after actual tools/backend checks pass in t
 
 ### Application defects
 
-No BUG records yet. The core import contract and eight CLI diagnostic tests pass after observed red/green cycles. Browser/task execution is not implemented. This is not a claim that the future product is bug-free.
+No BUG records yet. The B01 identifier/geometry/coordinate primitives, existing core import contract and eight CLI diagnostic tests pass: 25 behavior tests and five compile-fail doctests across the workspace. B01 TDD exposed and corrected floating-point midpoint boundary rounding before review; that deliberate red state is evidence in the handoff, not a fabricated shipped-product BUG. Browser/task execution and epoch-bound handle invalidation are not implemented. This is not a claim that the future product is bug-free. ENV-002/ENV-004 remain unverified native/runtime gates; pure-core B01 did not exercise or close them.
 
 ### Environment blockers
 

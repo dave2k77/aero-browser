@@ -1,6 +1,6 @@
 # AeroBrowser — task-first implementation plan and specification corrections
 
-Revision 2.2 — 2026-10-22. BATCH-00 bootstrap is in progress with real code/test evidence below. Authoritative product/technical requirements remain in [specification.md](specification.md); the original PDF is historical source. Tested bootstrap scaffolding/diagnostics do not imply task/browser subsystem completion or release readiness.
+Revision 2.3 — 2026-10-22. BATCH-00 is committed; the approved B01 primitives are ready for review, uncommitted. Authoritative product/technical requirements remain in [specification.md](specification.md); the original PDF is historical source. Tested core primitives/scaffolding/diagnostics do not imply task/browser subsystem completion or release readiness.
 
 ## Goal
 
@@ -64,7 +64,7 @@ The user approved the reviewed BATCH-00 commit/push. Root commit 5a4fac91e563873
 | A02 | committed | User native setup / Hermes verifies | 5a4fac9 records verified bootstrap tooling/pins; installed Rust/browser/pkg-config remain external. ENV-003 resolved; ENV-002/ENV-004 native/runtime qualification remains unverified. |
 | A03 | committed | Hermes | 5a4fac9: six-crate workspace, core import red/green, lockfile; build/test/fmt/clippy pass. |
 | A04 | committed | Hermes | 5a4fac9: eight CLI tests and real development browser local-pin/helper checks. Baseline diagnostics only; runtime_ready=false and C04/native/production-provenance gates remain unverified. |
-| B01 | not_started | — | — |
+| B01 | ready_for_review | Hermes | Approved pure primitives: core ids.rs/types.rs/lib.rs, core Cargo.toml/Cargo.lock; synchronized README, CONTRIBUTING, plan/requirements/handoff/tracker. Six string IDs, clipped geometry and three coordinate-space types implemented after observed red/green. Workspace: 25 behavior tests + five compile-fail doctests, build/fmt/Clippy pass. [Evidence and limits](handoff.md#current-b01-checkpoint). No runtime handle map, browser/tasks/providers, commit or push. |
 | B02 | not_started | — | — |
 | B03 | not_started | — | — |
 | B04 | not_started | — | — |
@@ -630,8 +630,12 @@ impl CssRect {
         let top = self.y.max(0.0);
         let right = raw_right.min(viewport.0);
         let bottom = raw_bottom.min(viewport.1);
-        (right > left && bottom > top)
-            .then_some((left + (right - left) / 2.0, top + (bottom - top) / 2.0))
+        if right <= left || bottom <= top {
+            return None;
+        }
+        let x = left + (right - left) / 2.0;
+        let y = top + (bottom - top) / 2.0;
+        (x > left && x < right && y > top && y < bottom).then_some((x, y))
     }
 }
 
@@ -653,10 +657,18 @@ mod tests {
         let large = CssRect { x: 1.0e308, y: 0.0, width: 4.0e307, height: 10.0 };
         let (x, y) = large.clipped_center((f64::MAX, 100.0)).unwrap();
         assert!(x.is_finite() && y.is_finite());
-        assert!(x >= large.x && x <= large.x + large.width);
+        assert!(x > large.x && x < large.x + large.width);
+    }
+
+    #[test]
+    fn center_rejects_unrepresentable_interior() {
+        let rect = CssRect { x: 0.0, y: 0.0, width: f64::from_bits(1), height: 1.0 };
+        assert_eq!(rect.clipped_center((1.0, 1.0)), None);
     }
 }
 ```
+
+The implemented B01 helper in `crates/aero-core/src/types.rs` additionally shares bounds validation with `FrameLocalRect`. Strict interior checks reject floating-point boundary rounding, not all tiny rectangles; a representable subnormal center remains valid. This unit-level predicate does not establish current browser geometry, visibility through occlusion, frame ownership or authority.
 
 Use separate wrapper types for frame-local rectangles, root viewport points, and screenshot pixel points. For axis-aligned frames, map child local coordinates using the parent's **content** quad and child viewport dimensions; account for borders, scaling, scroll, and nested ancestry. If the quad is non-axis-aligned, return `UnsupportedFrameTransform` and request takeover; never click an approximate point. Do not add an offset to CDP coordinates that are already root-relative: the browser calibration scenario defines which conversion each protocol result uses.
 
@@ -1052,7 +1064,7 @@ Install Rust using the official rustup method only after approval; choose/pin th
 
 | Task | Exact files and implementation | Red/green command; required assertions | Approved commit message |
 |---|---|---|---|
-| B01 | `crates/aero-core/src/{lib.rs,ids.rs,types.rs}`. Add distinct `TargetId`, `FrameId`, `CdpSessionId`, `RuntimeEpoch`, `DocumentEpoch`, `ObservationId`; geometry §7.3; element handle map carries epochs internally. IDs serialize as strings but cannot be swapped in Rust APIs. | `cargo test -p aero-core center_uses_visible_intersection`; also `cargo test -p aero-core ids_are_distinct`. Test round trips, NaN/zero/offscreen rejection, visible intersection. | `feat(core): define scoped IDs and CSS geometry` |
+| B01 | `crates/aero-core/src/{lib.rs,ids.rs,types.rs}`, core `Cargo.toml` and `Cargo.lock`. Add distinct `TargetId`, `FrameId`, `CdpSessionId`, `RuntimeEpoch`, `DocumentEpoch`, `ObservationId`; geometry §7.3; separate `FrameLocalRect`, `RootViewportPoint`, `ScreenshotPixelPoint`. IDs serialize as strings but cannot be swapped in Rust APIs. Supply epoch types here; the actual epoch-bound element handle map belongs with D01 observation construction and D02 freshness enforcement, not this pure-primitives batch. | `cargo test -p aero-core center_uses_visible_intersection`; `cargo test -p aero-core ids_are_distinct`; `cargo test -p aero-core --doc`. Test exact string round trips, NaN/zero/offscreen rejection, finite/strict-interior clipping, validated coordinate constructors and compile-fail cross-type checks. Full core and workspace gates must pass. | `feat(core): define scoped IDs and CSS geometry` |
 | B02 | `crates/aero-core/src/actions.rs`, `crates/aero-core/src/lib.rs`. Copy §7.1, simplify JSON fixtures to one-line raw strings, add strict `validate()` with all listed limits and finite number checks. Generate schema from the same type only when planner/MCP need it. | `cargo test -p aero-core decision_`; tests `decision_is_strict_and_round_trips`, `decision_rejects_limits`, `decision_rejects_unknown_action`. | `feat(core): add strict versioned action contracts` |
 | B03 | `crates/aero-core/src/form.rs`, `crates/aero-core/src/checkpoint.rs`, `crates/aero-core/src/events.rs`, `crates/aero-core/src/lib.rs`. Copy §7.2 and add task/run/contract references to versioned checkpoint/events, transient epoch IDs, artifact/evidence references and public status/usage. Authoritative TaskContract remains N01. | `cargo test -p aero-core form_json_preserves_empty_and_false`; `cargo test -p aero-core checkpoint_version`; reject wrong task/revision/future versions and invalid counters. | `feat(core): define task-linked recovery and event models` |
 | B04 | `crates/aero-agent/src/store/migrations/001_initial.sql`, `crates/aero-agent/src/store/mod.rs`, `crates/aero-agent/src/lib.rs`, `crates/aero-agent/tests/journal.rs`. Use revised §7.5 TaskContract/run/evidence/artifact schema, private paths and pragmas, known-version migrations only. Do not implement the superseded session-only schema. | `cargo test -p aero-agent --test journal schema_and_foreign_keys`; user_version=1, task→run foreign keys, immutable revisions, duplicate IDs, corruption/future schema errors, reopen persistence. | `feat(store): add task-owned transactional journal` |
@@ -1077,7 +1089,7 @@ Execution order inside this batch: C01–C04, then the standalone fixture-harnes
 
 | Task | Exact files and implementation | Red/green command; required assertions | Approved commit message |
 |---|---|---|---|
-| D01 | `crates/aero-perception/src/{axtree.rs,observation.rs,lib.rs}`, `crates/aero-core/src/types.rs`; unit tests beside parser. Parse AX role/name/properties/children/frame; keep headings/text/table context and actionable controls, not every static node as clickable. Stable DOM order; handle assignment once after frame merge; escape untrusted text in prompt serialization. | `cargo test -p aero-perception axtree_`; assert roles/disabled/readonly/heading level, text-only content kept, ignored nodes omitted, bounded deterministic output and handles consistent with map. | `feat(perception): build bounded semantic observations` |
+| D01 | `crates/aero-perception/src/{axtree.rs,observation.rs,lib.rs}`, `crates/aero-core/src/types.rs`; unit tests beside parser. Parse AX role/name/properties/children/frame; keep headings/text/table context and actionable controls, not every static node as clickable. Stable DOM order; handle assignment once after frame merge; bind each handle map to the B01 observation/runtime/document epoch and frame types for D02 freshness checks; escape untrusted text in prompt serialization. | `cargo test -p aero-perception axtree_`; assert roles/disabled/readonly/heading level, text-only content kept, ignored nodes omitted, bounded deterministic output and handles consistent with map. D02's `stale_observation_cannot_click` must reject prior-generation handles before input. | `feat(perception): build bounded semantic observations` |
 | D02 | `crates/aero-cdp/src/geometry.rs`, `crates/aero-perception/src/observation.rs`, `crates/aero-executor/src/{target.rs,dispatcher.rs,lib.rs}`. Query geometry only for retained action candidates, concurrency limit 8. Resolve current backend node in its session, scroll, remeasure, clip, hit-test then dispatch exactly one move/down/up sequence. Missing/stale/occluded/disabled node is error. | Cases `click_has_one_event_sequence`, `scroll_remeasures_target`, `stale_observation_cannot_click`, `occluded_target_is_rejected`; count click events exactly, not ≥1. | `feat(executor): ground actions in fresh visible targets` |
 | D03 | `crates/aero-executor/src/dispatcher.rs`; fixtures `crates/aero-agent/tests/fixtures/basic.html`, `crates/aero-agent/tests/fixtures/forms.html`. Focus once, verify active element, clear using Ctrl+A/Backspace (or chosen safe native input method); insert Unicode through `Input.insertText`; dedicated Enter key event, not newline text. PressKey allowlist; select/checked are explicit typed operations. | Cases `unicode_type_clear_and_enter`, `typing_does_not_double_click`, `select_and_checkbox_are_verified`; test emoji/non-Latin, controlled input, Enter submits only when approved. | `feat(executor): implement Unicode text and control actions` |
 | D04 | `crates/aero-cdp/src/frame_manager.rs`, `crates/aero-cdp/src/target_registry.rs`; `crates/aero-agent/tests/scenarios.rs`. Frame graph from frame tree/lifecycle and Runtime context auxData, not equality of target/frame IDs; recursively configure attached OOPIF sessions. Remove subtrees on detach and invalidate epochs on navigate. | Cases `same_process_frame_is_observable`, `nested_oopif_attaches_and_detaches`; assert distinct IDs stay distinct and old nodes fail after navigation. | `feat(cdp): track frame and execution-context identity` |

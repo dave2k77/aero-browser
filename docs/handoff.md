@@ -1,8 +1,39 @@
 # AeroBrowser — implementation handoff
 
-Document-set revision: 2.2, 2026-10-22. Product specification remains revision 2.0. Status: user-approved BATCH-00 baseline committed as 5a4fac91e5638735aa1cd762c183f63c9efa39de. This checkpoint update follows that commit; actual push delivery must be checked against remote main. Browser/runtime/native feature qualification remains unverified.
+Document-set revision: 2.3, 2026-10-22. Product specification remains revision 2.0. Status: approved B01 pure primitives ready for review, uncommitted. Last existing HEAD: 2e9bf91e858745ec171cbeb7b30fd1e796cfbde8 (README). Browser/runtime/native feature qualification remains unverified.
 
-## 0. Current BATCH-00 checkpoint
+## Current B01 checkpoint
+
+This is the current transfer record; the BATCH-00 and documentation-only sections below are historical evidence, not instructions to repeat setup. The user approved B01 after a proposal to implement typed IDs and safe geometry, then stop for review before any commit. No later package, commit or push is authorized by that approval.
+
+Implemented scope:
+
+- `crates/aero-core/src/ids.rs`: six distinct string-backed IDs, private inner strings, exact serde string round trips, owned map-key behavior, representative compile-fail cross-ID checks. These types do not generate or validate external identities, establish authority, or invalidate handles by themselves.
+- `crates/aero-core/src/types.rs`: `CssRect::clipped_center`, finite/positive/representable bounds, visible intersection, overflow-resistant midpoint and strict interior checks; validated `FrameLocalRect`, `RootViewportPoint` and `ScreenshotPixelPoint` without implicit conversions. Clipping stays in its input space; there is no frame projection, DPR conversion or current-browser hit testing.
+- Core `Cargo.toml`, `src/lib.rs`, root `Cargo.lock`: module exports, existing workspace serde dependency and test-only serde_json. No newly resolved package versions; normal core dependency tree remains serde and its derive machinery, with no browser/storage/provider runtime.
+- Status/traceability: `README.md`, `CONTRIBUTING.md`, `docs/implementation-plan.md`, `docs/requirements.md`, `docs/handoff.md`, `docs/bug-fix-tracking.md`. Requirements unchanged. The plan now explicitly assigns the actual epoch-bound element handle map to its D01/D02 observation/input owners; B01 only supplies the types. Its mandatory freshness behavior is not waived or implemented here.
+
+Observed TDD evidence (all deliberate red commands exited 101, not missing-tool failures):
+
+| Subtask | Red observation | Green evidence |
+|---|---|---|
+| B01.1 identifiers | `cargo test -p aero-core ids_are_distinct -- --nocapture` failed against string aliases; `cargo test -p aero-core --doc` failed because cross-ID examples incorrectly compiled. | Four ID unit tests and three ID compile-fail doctests pass with nominal wrappers. |
+| B01.2 clipping | `cargo test -p aero-core center_uses_visible_intersection -- --nocapture` failed against a method returning None. | Named test passes; nonfinite inputs, nonpositive dimensions, offscreen/empty area and overflowing bounds are covered. |
+| B01.3 rounded boundaries | `cargo test -p aero-core center_rejects_unrepresentable_interior -- --nocapture` failed when the calculated midpoint rounded onto an edge. | Strict interior predicate rejects that case; `center_keeps_small_representable_intersections` still accepts representable subnormal interiors. Seven geometry tests pass. |
+| B01.4 coordinate spaces | `cargo test -p aero-core coordinate_ -- --nocapture` exposed the screenshot/root alias and unvalidated points; `cargo test -p aero-core frame_local_rect_rejects_invalid_or_unrepresentable_bounds -- --nocapture` exposed the unchecked constructor; doctests exposed accepted cross-unit calls. | Five coordinate-space tests and two coordinate compile-fail doctests pass. |
+
+Actual shared gates on Rust/Cargo 1.99.1 in the existing WSL workspace, default feature selection:
+
+- `cargo test -p aero-core --locked`: 16 unit tests, one pre-existing import test, five compile-fail doctests passed.
+- `cargo test --workspace --locked`: 25 behavior tests (including all eight pre-existing CLI tests) and five compile-fail doctests passed; no failed, ignored or filtered tests. Empty scaffold suites are not feature coverage.
+- `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --locked -- -D warnings`, `cargo build --workspace --locked`: all exited 0.
+- Contributor documentation checker: PASS for 12 documents, 26 requirements, 31 corrections and 100 ledger packages. Extended validation: 12 tracked documents, 135 local links/anchors, 57 unique matrix rows; only SPEC-17/SPEC-19 advanced partially. Updated §7.3 reference code separately compiled and passed its three tests; this is additional documentation evidence, not extra production tests. Final diff/whitespace and exact 11-file scope checks passed, including direct inspection of the two new source files; index empty and lock package versions/provenance unchanged. Application acceptance is not inferred from these checks.
+
+Review/state: implementation self-review found no remaining B01 primitive defect; integrating checks above pass. Ledger state is ready_for_review, not verified/committed. Nothing staged or committed for B01; main HEAD remains the README commit above. No browser, provider, account or host-security operation was needed, and no long-running process was started by this batch. ENV-002/ENV-004 remain unverified native/runtime gates, not pure-core blockers.
+
+Next safe action: user review of this diff and explicit commit/push approval if desired. After review, propose B02 strict action/decision contracts, then B03 snapshots/events and N01 TaskContract before B04–B06 storage. Do not begin those packages as part of finishing B01.
+
+## 0. Previous BATCH-00 checkpoint
 
 This section supersedes the historical documentation-only/environment snapshot below. The user approved first-phase implementation and subsequently said, “ok, let's commit and push.” That authorizes the reviewed bootstrap baseline and checkpoint update to private main, not later features, real accounts/providers, license/redistribution choices, public release or host-security weakening.
 
@@ -26,7 +57,7 @@ Actual red/green and verification evidence:
 | Documentation integration | Contributor checker executed: PASS for 12 documents, links/fences/whitespace, 26 requirements, 31 corrections and 100 ledger packages. Extended validation passed 123 local links including anchors, 57 unique matrix rows and canonical named proofs/explicit suite/manual gates. The parent's real checks supersede the subagent's blocked validator command; no child self-report was accepted as proof. |
 | Working-tree boundaries | git diff --check passed (tracked diff is empty before first commit); independent whitespace/scope inspection checked all 32 project source/config/doc files. Historical PDF SHA-256 unchanged; target/PDF/local Hermes plan ignored; Git index empty and HEAD absent. GitHub read-back confirmed PRIVATE and isEmpty=true. |
 
-Next safe action after verifying the authorized push: prepare the B01/N01 contract batch, not provider/UI work. Bootstrap review/commit approval is recorded; later implementation/commit scope is separate. Native/runtime qualification is not complete, and no process is intentionally left running.
+Historical next action was B01 preparation; the current B01 checkpoint above supersedes it. Bootstrap review/commit approval did not authorize later commits. Native/runtime qualification remains incomplete.
 
 ## 1. Start here
 
@@ -49,7 +80,7 @@ Document ownership:
 - Handoff: current verified checkpoint, approvals, changed files, next safe action, and transfer notes.
 - Contributor guide: recurring working rules, not another task/status backlog.
 
-The project owner approves requirements/scope, setup, commits, and external actions. Hermes is the integrating implementer and has reviewed bootstrap evidence; owner review and commit approval are still pending. A01's child owned only its five documentation paths and has completed that work.
+The project owner approves requirements/scope, setup, commits, and external actions. Hermes is the integrating implementer. Bootstrap and README were separately approved and committed; B01 owner review and commit approval remain pending. A01's child owned only its five documentation paths and has completed that work.
 
 ## 2. Historical documentation baseline — superseded by §0
 
