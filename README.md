@@ -6,7 +6,7 @@ The goal is to let users delegate bounded browser tasks, inspect the resulting e
 
 ## Current status
 
-**Early development: bootstrap plus B01 core primitives (B01 awaiting review). This is not yet a usable browser or an autonomous browsing agent.**
+**Early development: bootstrap plus committed B01 core primitives. This is not yet a usable browser or an autonomous browsing agent.**
 
 Implemented:
 

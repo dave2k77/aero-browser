@@ -1,6 +1,6 @@
 # Contributing to AeroBrowser
 
-Status: B01 pure primitives ready for review, uncommitted, 2026-10-22; see the [current handoff](docs/handoff.md#current-b01-checkpoint). The user approved committing and pushing the earlier bootstrap/README, not B01. Local main is linked to the private GitHub repository; verify current remote delivery from Git rather than this static snapshot. Browser execution, task/control/policy/store and native sandbox qualification remain future work. Every later batch still requires review and explicit commit/push approval.
+Status: B01 pure primitives committed as 54e0a9573d8eb90746243f0f24056b05a3022988, 2026-10-22; see the [current handoff](docs/handoff.md#current-b01-checkpoint). After the review report, the user explicitly said “commit and push” for B01. Local main is linked to the private GitHub repository; verify current remote delivery from Git rather than this static snapshot. Browser execution, task/control/policy/store and native sandbox qualification remain future work. Every later batch still requires review and explicit commit/push approval.
 
 ## 1. Read first and respect document authority
 

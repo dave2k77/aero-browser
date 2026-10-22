@@ -1,6 +1,6 @@
 # AeroBrowser — bug, fix, blocker, and decision tracker
 
-Updated for B01 review on 2026-10-22. This remains the authoritative local issue register. Local main is linked to private dave2k77/aero-browser; bootstrap and README were separately approved and committed. B01 primitives are ready for review, uncommitted; see the [current evidence record](handoff.md#current-b01-checkpoint). Hosted issue migration, B01/later batch commits, public release and private-evidence publication are not approved. Verify actual remote delivery separately.
+Updated for the approved B01 commit on 2026-10-22. This remains the authoritative local issue register. Local main is linked to private dave2k77/aero-browser; bootstrap and README were separately approved and committed. B01 primitives are committed as 54e0a9573d8eb90746243f0f24056b05a3022988 after the user said “commit and push”; see the [current evidence record](handoff.md#current-b01-checkpoint). Hosted issue migration, later batch commits, public release and private-evidence publication are not approved. Verify actual remote delivery separately.
 
 Read [the specification](specification.md), [implementation plan](implementation-plan.md), [handoff](handoff.md), and [contribution rules](../CONTRIBUTING.md). Bootstrap code and prerequisite diagnostics now exist. Deliberate TDD red states, missing setup and untested platform assumptions are not disguised as production defects or completed fixes.
 

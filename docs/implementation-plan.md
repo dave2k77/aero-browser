@@ -1,6 +1,6 @@
 # AeroBrowser — task-first implementation plan and specification corrections
 
-Revision 2.3 — 2026-10-22. BATCH-00 is committed; the approved B01 primitives are ready for review, uncommitted. Authoritative product/technical requirements remain in [specification.md](specification.md); the original PDF is historical source. Tested core primitives/scaffolding/diagnostics do not imply task/browser subsystem completion or release readiness.
+Revision 2.3 — 2026-10-22. BATCH-00 and B01 primitives are committed; B01 is recorded in 54e0a9573d8eb90746243f0f24056b05a3022988 after explicit user commit/push approval. Authoritative product/technical requirements remain in [specification.md](specification.md); the original PDF is historical source. Tested core primitives/scaffolding/diagnostics do not imply task/browser subsystem completion or release readiness.
 
 ## Goal
 
@@ -64,7 +64,7 @@ The user approved the reviewed BATCH-00 commit/push. Root commit 5a4fac91e563873
 | A02 | committed | User native setup / Hermes verifies | 5a4fac9 records verified bootstrap tooling/pins; installed Rust/browser/pkg-config remain external. ENV-003 resolved; ENV-002/ENV-004 native/runtime qualification remains unverified. |
 | A03 | committed | Hermes | 5a4fac9: six-crate workspace, core import red/green, lockfile; build/test/fmt/clippy pass. |
 | A04 | committed | Hermes | 5a4fac9: eight CLI tests and real development browser local-pin/helper checks. Baseline diagnostics only; runtime_ready=false and C04/native/production-provenance gates remain unverified. |
-| B01 | ready_for_review | Hermes | Approved pure primitives: core ids.rs/types.rs/lib.rs, core Cargo.toml/Cargo.lock; synchronized README, CONTRIBUTING, plan/requirements/handoff/tracker. Six string IDs, clipped geometry and three coordinate-space types implemented after observed red/green. Workspace: 25 behavior tests + five compile-fail doctests, build/fmt/Clippy pass. [Evidence and limits](handoff.md#current-b01-checkpoint). No runtime handle map, browser/tasks/providers, commit or push. |
+| B01 | committed | Hermes | 54e0a9573d8eb90746243f0f24056b05a3022988: reviewed pure IDs/geometry/coordinate primitives and synchronized documentation; user then said “commit and push.” Workspace: 25 behavior tests + five compile-fail doctests, build/fmt/Clippy and documentation gates rerun successfully before commit. [Evidence and limits](handoff.md#current-b01-checkpoint). No runtime handle map or browser/tasks/providers; verify remote delivery separately. |
 | B02 | not_started | — | — |
 | B03 | not_started | — | — |
 | B04 | not_started | — | — |

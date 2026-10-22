@@ -1,10 +1,10 @@
 # AeroBrowser — implementation handoff
 
-Document-set revision: 2.3, 2026-10-22. Product specification remains revision 2.0. Status: approved B01 pure primitives ready for review, uncommitted. Last existing HEAD: 2e9bf91e858745ec171cbeb7b30fd1e796cfbde8 (README). Browser/runtime/native feature qualification remains unverified.
+Document-set revision: 2.3, 2026-10-22. Product specification remains revision 2.0. Status: B01 pure primitives committed as 54e0a9573d8eb90746243f0f24056b05a3022988. This approval/status update follows the feature commit; consult Git for its final metadata-commit SHA and verify remote main separately. Browser/runtime/native feature qualification remains unverified.
 
 ## Current B01 checkpoint
 
-This is the current transfer record; the BATCH-00 and documentation-only sections below are historical evidence, not instructions to repeat setup. The user approved B01 after a proposal to implement typed IDs and safe geometry, then stop for review before any commit. No later package, commit or push is authorized by that approval.
+This is the current transfer record; the BATCH-00 and documentation-only sections below are historical evidence, not instructions to repeat setup. The user approved B01 after a proposal to implement typed IDs and safe geometry, then stop for review before any commit. After the review report and passing checks, the user explicitly said “commit and push.” That authorizes publication of this B01 batch and its approval/status record, not implementation or publication of later packages.
 
 Implemented scope:
 
@@ -29,9 +29,9 @@ Actual shared gates on Rust/Cargo 1.99.1 in the existing WSL workspace, default 
 - `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --locked -- -D warnings`, `cargo build --workspace --locked`: all exited 0.
 - Contributor documentation checker: PASS for 12 documents, 26 requirements, 31 corrections and 100 ledger packages. Extended validation: 12 tracked documents, 135 local links/anchors, 57 unique matrix rows; only SPEC-17/SPEC-19 advanced partially. Updated §7.3 reference code separately compiled and passed its three tests; this is additional documentation evidence, not extra production tests. Final diff/whitespace and exact 11-file scope checks passed, including direct inspection of the two new source files; index empty and lock package versions/provenance unchanged. Application acceptance is not inferred from these checks.
 
-Review/state: implementation self-review found no remaining B01 primitive defect; integrating checks above pass. Ledger state is ready_for_review, not verified/committed. Nothing staged or committed for B01; main HEAD remains the README commit above. No browser, provider, account or host-security operation was needed, and no long-running process was started by this batch. ENV-002/ENV-004 remain unverified native/runtime gates, not pure-core blockers.
+Review/state: implementation self-review found no remaining B01 primitive defect; integrating checks above pass. The full workspace/build/fmt/Clippy and documentation/scope gates were rerun successfully immediately before committing the approved exact 11-file batch as 54e0a9573d8eb90746243f0f24056b05a3022988, `feat(core): define scoped IDs and CSS geometry`. The tree was clean after that commit. Ledger state is committed; this follow-up changes documentation only to record the actual SHA/approval. Push is authorized, but remote delivery must be read back from main before reporting success. No browser, provider, account or host-security operation was needed, and no long-running process was started by this batch. ENV-002/ENV-004 remain unverified native/runtime gates, not pure-core blockers.
 
-Next safe action: user review of this diff and explicit commit/push approval if desired. After review, propose B02 strict action/decision contracts, then B03 snapshots/events and N01 TaskContract before B04–B06 storage. Do not begin those packages as part of finishing B01.
+Next safe action after verifying the authorized push: propose B02 strict action/decision contracts, then B03 snapshots/events and N01 TaskContract before B04–B06 storage. Do not begin those packages as part of finishing B01. They require separate approval.
 
 ## 0. Previous BATCH-00 checkpoint
 
@@ -80,7 +80,7 @@ Document ownership:
 - Handoff: current verified checkpoint, approvals, changed files, next safe action, and transfer notes.
 - Contributor guide: recurring working rules, not another task/status backlog.
 
-The project owner approves requirements/scope, setup, commits, and external actions. Hermes is the integrating implementer. Bootstrap and README were separately approved and committed; B01 owner review and commit approval remain pending. A01's child owned only its five documentation paths and has completed that work.
+The project owner approves requirements/scope, setup, commits, and external actions. Hermes is the integrating implementer. Bootstrap, README and B01 were separately approved and committed; later batch approvals remain separate. A01's child owned only its five documentation paths and has completed that work.
 
 ## 2. Historical documentation baseline — superseded by §0
 
