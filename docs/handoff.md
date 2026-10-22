@@ -1,6 +1,25 @@
 # AeroBrowser — implementation handoff
 
-Document-set revision: 2.3, 2026-10-22. Product specification remains revision 2.0. Status: B01 pure primitives committed as 54e0a9573d8eb90746243f0f24056b05a3022988. This approval/status update follows the feature commit; consult Git for its final metadata-commit SHA and verify remote main separately. Browser/runtime/native feature qualification remains unverified.
+Document-set revision: 2.3, 2026-10-22. Product specification remains revision 2.0. Status: paused for the night after B01 was committed and pushed. Implementation commit: 54e0a9573d8eb90746243f0f24056b05a3022988; approval/status commit: 1b2a3daa03f3ac36dea1c8be7620584bec96e3bd. Browser/runtime/native feature qualification remains unverified.
+
+## End-of-session handoff
+
+Stop instruction: the user said, “ok update the hand-off and we stop here tonight,” then requested, “update the main README.md and then do a final commit for the night.” This authorizes one final documentation commit containing README.md and this handoff, not B02 implementation or another push.
+
+- At 2026-10-22 21:55 +08:00, local main and remote main were independently checked at 1b2a3daa03f3ac36dea1c8be7620584bec96e3bd; the working tree was clean before this handoff edit. The preceding publication check also confirmed the same SHA through the GitHub API.
+- Both B01 commits are pushed. The final documentation scope is `README.md` plus `docs/handoff.md`, committed locally under the user's final-night request. Use Git for that documentation commit's actual SHA; it is not self-embedded here. The last verified published checkpoint is 1b2a3daa03f3ac36dea1c8be7620584bec96e3bd; this final documentation commit is not pushed. Recheck local/remote state next session rather than assuming they still match.
+- Last application gates: 25 behavior tests and five compile-fail doctests passed, with workspace build, formatting and warning-denied Clippy. These were rerun before the approved B01 commit; they are not claimed rerun for this documentation-only stop note. Documentation validation is used for this edit.
+- No background job, server, browser session or automatic continuation was started by this batch. No cleanup or native qualification is implied for unrelated machine processes.
+- Remaining gates: ENV-002 browser/sandbox/provenance qualification and ENV-004 native display/keyring/platform evidence remain unverified. AeroBrowser is not yet a usable browser; handle-map freshness, task execution, permissions, storage/recovery, providers and desktop remain future work.
+
+Next session:
+
+1. Read this handoff and recheck Git status/log and local main versus origin/main. The final README/handoff commit is local-only; obtain a push request before publishing it. Do not repeat Rust provisioning, bootstrap, README or B01 work.
+2. Obtain approval for B02 only: strict versioned action/decision contracts in `crates/aero-core/src/actions.rs` and its `src/lib.rs` export, following the canonical plan §7.1 and B02 assertions. B02 is not authorized by tonight's stop instruction.
+3. Once approved, add the named decision tests first (`decision_is_strict_and_round_trips`, `decision_rejects_limits`, `decision_rejects_unknown_action`); run `cargo test -p aero-core decision_ -- --nocapture` and obtain meaningful red before minimal implementation. A zero-test run is not proof.
+4. Run core/workspace/build/fmt/Clippy and documentation gates, update traceability, then stop for review before committing. Later sequence remains B03, N01, then B04–B06; no browser/provider/UI expansion is part of B02.
+
+Environment reminder: Cargo may be absent from a fresh shell's PATH even though the pinned toolchain is installed. Use `export PATH="$HOME/.cargo/bin:$PATH"` before Rust checks; do not reinstall or change the pin to work around PATH.
 
 ## Current B01 checkpoint
 
@@ -29,9 +48,9 @@ Actual shared gates on Rust/Cargo 1.99.1 in the existing WSL workspace, default 
 - `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --locked -- -D warnings`, `cargo build --workspace --locked`: all exited 0.
 - Contributor documentation checker: PASS for 12 documents, 26 requirements, 31 corrections and 100 ledger packages. Extended validation: 12 tracked documents, 135 local links/anchors, 57 unique matrix rows; only SPEC-17/SPEC-19 advanced partially. Updated §7.3 reference code separately compiled and passed its three tests; this is additional documentation evidence, not extra production tests. Final diff/whitespace and exact 11-file scope checks passed, including direct inspection of the two new source files; index empty and lock package versions/provenance unchanged. Application acceptance is not inferred from these checks.
 
-Review/state: implementation self-review found no remaining B01 primitive defect; integrating checks above pass. The full workspace/build/fmt/Clippy and documentation/scope gates were rerun successfully immediately before committing the approved exact 11-file batch as 54e0a9573d8eb90746243f0f24056b05a3022988, `feat(core): define scoped IDs and CSS geometry`. The tree was clean after that commit. Ledger state is committed; this follow-up changes documentation only to record the actual SHA/approval. Push is authorized, but remote delivery must be read back from main before reporting success. No browser, provider, account or host-security operation was needed, and no long-running process was started by this batch. ENV-002/ENV-004 remain unverified native/runtime gates, not pure-core blockers.
+Review/state: implementation self-review found no remaining B01 primitive defect; integrating checks above pass. The full workspace/build/fmt/Clippy and documentation/scope gates were rerun successfully immediately before committing the approved exact 11-file batch as 54e0a9573d8eb90746243f0f24056b05a3022988, `feat(core): define scoped IDs and CSS geometry`. Approval/status commit 1b2a3daa03f3ac36dea1c8be7620584bec96e3bd followed, and both were pushed to main. Local HEAD, origin/main, remote main and the GitHub API were read back at the same final SHA; the working tree was clean after publication. Ledger state is committed. The end-of-session section above records the subsequent local README/handoff documentation commit. No browser, provider, account or host-security operation was needed, and no long-running process was started by this batch. ENV-002/ENV-004 remain unverified native/runtime gates, not pure-core blockers.
 
-Next safe action after verifying the authorized push: propose B02 strict action/decision contracts, then B03 snapshots/events and N01 TaskContract before B04–B06 storage. Do not begin those packages as part of finishing B01. They require separate approval.
+Work is paused at the user's request. Next session, propose B02 strict action/decision contracts, then B03 snapshots/events and N01 TaskContract before B04–B06 storage. Do not begin those packages tonight or as part of finishing B01. They require separate approval.
 
 ## 0. Previous BATCH-00 checkpoint
 

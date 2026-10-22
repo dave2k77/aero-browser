@@ -14,11 +14,17 @@ Implemented:
 - An `aero` CLI with help, version information, and a `doctor` command.
 - Bounded executable/version probes and comparison against a recorded development browser byte pin.
 - Bootstrap tests, requirements traceability, architecture decisions, and contributor documentation.
-- Distinct string identifiers, clipped CSS geometry, and separate frame-local/root-CSS/screenshot coordinate types, with unit and compile-fail tests.
+- B01 core primitives: six distinct string identifiers for targets, frames, CDP sessions, runtime/document generations and observations; exact string serialization; clipped CSS geometry; and separate validated frame-local/root-CSS/screenshot coordinate types.
 
 Not implemented yet: browser process supervision and CDP transport, task execution, permission enforcement, durable task storage/recovery, model-provider integration, or a desktop interface. The library crates establish boundaries; their presence does not mean those subsystems work.
 
 The intended first useful workflow is supplier research against deterministic local fixtures: produce an ordered CSV, a sourced comparison report, and a verified artifact manifest while identifying unknowns and avoiding account creation, submission, uploads, or purchases. This is a planned acceptance scenario, not a feature available today.
+
+### Latest checkpoint — 2026-10-22
+
+Bootstrap and B01 are committed and pushed to `main`: `54e0a95` implements scoped identifiers and safe geometry; `1b2a3da` records the approved B01 checkpoint. Geometry tests cover visible intersections, invalid/nonfinite inputs, overflow and floating-point boundary rounding. Compile-fail tests check that identifiers and coordinate spaces cannot be implicitly mixed.
+
+Work is paused after B01. The next proposed batch is **B02: strict versioned action/decision contracts**, followed by B03 snapshots/events and N01 TaskContract before persistent journaling. B02 has not started and requires separate approval. See the [end-of-session handoff](docs/handoff.md#end-of-session-handoff) for restart instructions, remaining gates and publication state.
 
 ## Quickstart
 
@@ -28,7 +34,7 @@ The intended first useful workflow is supplier research against deterministic lo
 - Rust **1.99.1**, with rustfmt and Clippy, as pinned in [`rust-toolchain.toml`](rust-toolchain.toml).
 - Git and access to the repository. The SSH clone command below requires GitHub SSH authentication.
 
-Rustup can provision the pinned toolchain when Cargo first runs. No Node.js, model provider, keyring, or browser binary is required to build and test the current bootstrap.
+Rustup can provision the pinned toolchain when Cargo first runs. No Node.js, model provider, keyring, or browser binary is required to build and test the current bootstrap and core primitives.
 
 ```bash
 git clone git@github.com:dave2k77/aero-browser.git
@@ -69,7 +75,9 @@ cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo build --workspace --locked
 ```
 
-These validate the implemented bootstrap, not delegated browsing, native sandbox behavior, or model quality. Required real-browser and native-platform suites will be introduced with their corresponding implementation; unavailable prerequisites must not silently count as a pass.
+The latest verified application run on 2026-10-22 passed **25 behavior tests and five compile-fail doctests**, plus workspace build, formatting and warning-denied Clippy. Documentation checks also passed. The end-of-session README/handoff update is documentation-only; its checks are not a new application-test run.
+
+These checks validate the implemented bootstrap and B01 core primitives, not delegated browsing, native sandbox behavior, or model quality. In particular, the types do not establish handle freshness, frame projection, DPR calibration, target hit testing or authorization. Required real-browser and native-platform suites will be introduced with their corresponding implementation; unavailable prerequisites must not silently count as a pass.
 
 ## Architecture
 
