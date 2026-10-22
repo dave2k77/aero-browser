@@ -1,6 +1,6 @@
 # Contributing to AeroBrowser
 
-Status: BATCH-00 bootstrap, 2026-10-22. A six-crate Rust workspace and tested CLI readiness diagnostics now exist. Local main is linked to the private GitHub repository; nothing has been committed or pushed. Browser execution, task/control/policy/store implementation and native sandbox qualification remain future work. Read the handoff for actual evidence; commands for later features remain future gates, not claimed results.
+Status: BATCH-00 bootstrap, 2026-10-22. The user approved committing and pushing the reviewed baseline; root commit 5a4fac91e5638735aa1cd762c183f63c9efa39de contains the six-crate workspace, tested readiness diagnostics and documentation. Local main is linked to the private GitHub repository; verify current remote delivery from Git rather than this static snapshot. Browser execution, task/control/policy/store and native sandbox qualification remain future work. Later batches still require review and explicit commit/push approval.
 
 ## 1. Read first and respect document authority
 
@@ -195,7 +195,7 @@ Capture concise output and exact commands; never invent timestamps, SHAs, test c
 
 ## 7. Git, commits, and review
 
-Git is initialized on main with origin at `git@github.com:dave2k77/aero-browser.git`, following the user's explicit repository-creation request. Do not initialize it again. No commit or push has been approved. The historical PDF and `.hermes` session artifacts are ignored pending source-inclusion review; the optional local legacy plan redirect is not required in a fresh clone. Do not change global Git identity, commit the PDF, sign, push, or publish as a side effect of setup. License files require owner confirmation; the plan's candidate names are not a legal decision.
+Git is initialized on main with origin at `git@github.com:dave2k77/aero-browser.git`. Do not initialize it again. The user explicitly approved the initial bootstrap commit and push; this does not grant ongoing commit/push permission for later batches. The historical PDF and `.hermes` session artifacts remain ignored pending source-inclusion review; the optional legacy redirect is not required in a fresh clone. Do not change global Git identity, commit the PDF, sign or publish a release as a setup side effect. License files require owner confirmation.
 
 After approved initialization, inspect `git status --short`, `git branch --show-current`, and `git diff` before acting. Preserve the user's unrelated work. Use short-lived `feat/ID-description`, `fix/BUG-ID-description`, or `docs/description` branches when a branch is useful; no branch rename or history rewrite without authorization.
 

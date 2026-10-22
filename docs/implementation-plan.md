@@ -56,14 +56,14 @@ Before editing, claim one package/subtask, owner, exact file scope, dependencies
 
 Record microtasks under the package as `ID.1`, `ID.2`, etc.: one named failing behavior, exact test/implementation paths, red command/result, minimal change, green command/result, review. Preserve these evidence records with the reviewed diff/commit; link their stable location in the last column. Limit focused edits to 2–5 minutes; browser provisioning/native manual sessions are explicit longer operations, not fictitious five-minute tests. The detailed §8 rows are work packages, not timing estimates.
 
-The ledger now tracks BATCH-00 progress. `—` means no owner/evidence assigned, not a hidden pass. Tested scaffold/diagnostic work is distinguished from unimplemented task/browser runtime behavior. Review is pending; no package has been committed. See the current handoff and docs/development.md for actual commands and limits.
+The user approved the reviewed BATCH-00 commit/push. Root commit 5a4fac91e5638735aa1cd762c183f63c9efa39de records its baseline; this checkpoint update records completed bootstrap scope, not browser-runtime or product completion. `—` means no assigned owner/evidence. Verify current remote delivery from Git. Later batches require separate review/approval.
 
 | Package | State | Owner | Evidence / blocker / approved scope |
 |---|---|---|---|
-| A01 | ready_for_review | Documentation subagent; Hermes integrates | Parent read all five docs and independently validated 26 REQ/31 SPEC rows, canonical mappings/proofs, and local links/anchors. Suite/manual gates and future proof gaps remain explicit; no feature acceptance claimed. |
-| A02 | ready_for_review | User native setup / Hermes verifies | Bootstrap scope: pinned Rust 1.99.1 + rustfmt/clippy, development browser and pkg-config 2.5.1 verified. ENV-003 resolved; actual browser sandbox and native feature-library qualification remain separate ENV-002/ENV-004 gates. |
-| A03 | ready_for_review | Hermes | Six-member workspace; core import red/green; workspace build/test/fmt/clippy pass. Source and Cargo.lock uncommitted. |
-| A04 | ready_for_review | Hermes | Eight CLI tests red/green; actual browser version/local byte pin matches; pin helper pass/fail exercised. Baseline diagnostics only: runtime_ready=false, C04/native/provenance-release acceptance still unverified. |
+| A01 | committed | Documentation subagent; Hermes integrates | 5a4fac9: source/requirements/ADRs and traceability checks reviewed and approved; future suite/manual proof gaps remain explicit. No application-feature acceptance claimed. |
+| A02 | committed | User native setup / Hermes verifies | 5a4fac9 records verified bootstrap tooling/pins; installed Rust/browser/pkg-config remain external. ENV-003 resolved; ENV-002/ENV-004 native/runtime qualification remains unverified. |
+| A03 | committed | Hermes | 5a4fac9: six-crate workspace, core import red/green, lockfile; build/test/fmt/clippy pass. |
+| A04 | committed | Hermes | 5a4fac9: eight CLI tests and real development browser local-pin/helper checks. Baseline diagnostics only; runtime_ready=false and C04/native/production-provenance gates remain unverified. |
 | B01 | not_started | — | — |
 | B02 | not_started | — | — |
 | B03 | not_started | — | — |

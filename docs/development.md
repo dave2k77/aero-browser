@@ -99,4 +99,4 @@ ENV-003 now records actual tool availability; this does not establish compatibil
 
 ## Git and review
 
-Local `main` is linked to the private GitHub remote `git@github.com:dave2k77/aero-browser.git`. There are no approved commits/pushes yet. Review exact files and real results before an explicitly approved scoped commit. `.gitignore` excludes build/runtime data, credentials, `.hermes` session artifacts, and the historical PDF pending rights/size review; it does not ignore Cargo.lock. Runtime/browser provisioning remains outside the repository.
+Local `main` is linked to the private GitHub remote `git@github.com:dave2k77/aero-browser.git`. The user approved the initial bootstrap commit/push; root commit 5a4fac91e5638735aa1cd762c183f63c9efa39de records the reviewed baseline. Check actual HEAD/origin status for delivery; later batches require their own review and scoped approval. `.gitignore` excludes build/runtime data, credentials, `.hermes` session artifacts and the historical PDF pending rights/size review; Cargo.lock remains tracked. Browser provisioning remains outside the repository.

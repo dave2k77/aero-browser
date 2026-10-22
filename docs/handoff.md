@@ -1,10 +1,10 @@
 # AeroBrowser — implementation handoff
 
-Document-set revision: 2.2, 2026-10-22. Product specification remains revision 2.0. Status: BATCH-00 baseline ready for user review, uncommitted; pkg-config setup verified, actual browser/runtime and native feature qualification still unverified. This handoff transfers observed state, not an assertion that the planned browser works.
+Document-set revision: 2.2, 2026-10-22. Product specification remains revision 2.0. Status: user-approved BATCH-00 baseline committed as 5a4fac91e5638735aa1cd762c183f63c9efa39de. This checkpoint update follows that commit; actual push delivery must be checked against remote main. Browser/runtime/native feature qualification remains unverified.
 
 ## 0. Current BATCH-00 checkpoint
 
-This section supersedes the historical documentation-only/environment snapshot below. The user explicitly requested GitHub creation, then approved proceeding after the first-phase setup/scaffold/doctor scope was explained. Local main/origin now exist. No commit, push, real account/provider operation, project license choice, browser redistribution or host-security weakening is authorized.
+This section supersedes the historical documentation-only/environment snapshot below. The user approved first-phase implementation and subsequently said, “ok, let's commit and push.” That authorizes the reviewed bootstrap baseline and checkpoint update to private main, not later features, real accounts/providers, license/redistribution choices, public release or host-security weakening.
 
 - A01: parent read all five requirements/architecture/ADR documents and independently validated exactly 26 requirement and 31 correction rows, canonical package/test-name mappings, all local file links and anchors. Existing suite/manual gates and missing dedicated SPEC-23/SPEC-26 behavioral proof names are disclosed, not invented or considered application coverage. Requirements remain not_started until actual acceptance. Documentation is ready for user review.
 - A02: official user-local Rust/Cargo 1.99.1 with rustfmt/clippy provisioned; compiler pinned in rust-toolchain.toml. GCC and Bubblewrap already present. User-installed pkg-config 2.5.1 verified at /usr/bin/pkg-config (canonical /usr/bin/pkgconf), resolving ENV-003 for bootstrap availability. Native platform/keyring/sandbox and future native-library gates remain unproven.
@@ -12,7 +12,7 @@ This section supersedes the historical documentation-only/environment snapshot b
 - A04 baseline: real CLI --help/--version/argument handling and bounded prerequisite/version/hash diagnostics implemented. Eight CLI tests passed after observed red; explicit empty/missing path never falls back, hung versions are killed/waited, oversized output rejected, failed stderr hidden, child environment cleared. No browsing session is launched.
 - Development browser: Chrome for Testing 156.0.8078.47 Linux64 was provisioned in the user's private cache. Real --version and Rust local executable-pin check passed. Vendor archive MD5 was compared against separately fetched Storage response headers; SHA-256 values are local byte pins, not independent vendor signatures. Redistribution is not approved. Details: [development.md](development.md).
 - Intentional unready report: follow-up actual doctor JSON reports available browser, Bubblewrap and pkg-config 2.5.1, matched_local_pin, sandbox/user namespaces/keyring not_checked, display not_configured, runtime_ready=false; exit 2 is correct. This does not satisfy C04/G0/G1.
-- Git: main, origin git@github.com:dave2k77/aero-browser.git; no commits or pushes. .gitignore excludes target/runtime data/secrets, historical PDF and .hermes artifacts; Cargo.lock is not ignored.
+- Git: main, origin git@github.com:dave2k77/aero-browser.git; root commit 5a4fac91e5638735aa1cd762c183f63c9efa39de contains exactly the reviewed 32 text files. PDF, browser binaries, target/runtime data/secrets and .hermes artifacts are excluded. Cargo.lock is tracked. Check Git for the checkpoint-update commit and current push verification; do not infer remote delivery from this static document.
 
 Actual red/green and verification evidence:
 
@@ -26,7 +26,7 @@ Actual red/green and verification evidence:
 | Documentation integration | Contributor checker executed: PASS for 12 documents, links/fences/whitespace, 26 requirements, 31 corrections and 100 ledger packages. Extended validation passed 123 local links including anchors, 57 unique matrix rows and canonical named proofs/explicit suite/manual gates. The parent's real checks supersede the subagent's blocked validator command; no child self-report was accepted as proof. |
 | Working-tree boundaries | git diff --check passed (tracked diff is empty before first commit); independent whitespace/scope inspection checked all 32 project source/config/doc files. Historical PDF SHA-256 unchanged; target/PDF/local Hermes plan ignored; Git index empty and HEAD absent. GitHub read-back confirmed PRIVATE and isEmpty=true. |
 
-Next safe action: user reviews this uncommitted batch; the pkg-config bootstrap blocker is resolved and A02 bootstrap scope is ready_for_review. After review, proceed to B01/N01 contracts, not provider/UI work. Actual runtime/native qualification is not complete. Commit/push remain unapproved; no processes started by this batch are intentionally left running.
+Next safe action after verifying the authorized push: prepare the B01/N01 contract batch, not provider/UI work. Bootstrap review/commit approval is recorded; later implementation/commit scope is separate. Native/runtime qualification is not complete, and no process is intentionally left running.
 
 ## 1. Start here
 
@@ -227,6 +227,10 @@ Commit approval and actual SHA, or no commit:
 Do not erase the prior checkpoint's evidence or describe a task as complete because the plan was completed. Retain concise batch history below and link larger reviewed evidence records from the plan ledger. Never include credentials, private pages, runtime profiles, or hidden model reasoning.
 
 ## 8. Batch history
+
+### BATCH-00 commit approval
+
+User request: “ok, let's commit and push.” Primary implementation commit: 5a4fac91e5638735aa1cd762c183f63c9efa39de, feat: bootstrap AeroBrowser workspace and readiness diagnostics. All bootstrap tests, build, formatting, warning-denied clippy and documentation/staged-scope checks passed. This accompanying documentation checkpoint records the real primary SHA rather than inventing a self-referential commit ID. Delivery verification compares final local HEAD with remote main; excluded artifacts remain local.
 
 ### BATCH-00 — initial implementation baseline, 2026-10-22
 

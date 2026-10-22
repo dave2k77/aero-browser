@@ -1,6 +1,6 @@
 # AeroBrowser — bug, fix, blocker, and decision tracker
 
-Updated for BATCH-00 on 2026-10-22. This remains the authoritative local issue register. Local main is linked to the private dave2k77/aero-browser GitHub repository; no commits, pushes or hosted issue migration have been approved. Do not open remote issues or migrate private evidence automatically.
+Updated for BATCH-00 on 2026-10-22. This remains the authoritative local issue register. Local main is linked to private dave2k77/aero-browser; the user approved the reviewed bootstrap commit/push, and root commit 5a4fac91e5638735aa1cd762c183f63c9efa39de now exists. Hosted issue migration, later batch commits, public release and private-evidence publication are not approved. Verify actual remote delivery separately.
 
 Read [the specification](specification.md), [implementation plan](implementation-plan.md), [handoff](handoff.md), and [contribution rules](../CONTRIBUTING.md). Bootstrap code and prerequisite diagnostics now exist. Deliberate TDD red states, missing setup and untested platform assumptions are not disguised as production defects or completed fixes.
 
@@ -124,6 +124,8 @@ Accepted scope: after setup, minimal six-crate scaffold and doctor checks were e
 #### DEC-002 — Repository and source inclusion
 
 Accepted repository scope: the user explicitly requested the GitHub repository before implementation. Created https://github.com/dave2k77/aero-browser as private/empty, initialized local main, connected origin via SSH, and read back those values. No commit, push, identity change or upload occurred. The original PDF, browser/runtime data and .hermes artifacts are ignored. Commits require explicit batch approval; PDF rights/inclusion and project/browser licensing remain undecided under DEC-005.
+
+Follow-up approval: the user said, “ok, let's commit and push.” The reviewed BATCH-00 baseline was committed as 5a4fac91e5638735aa1cd762c183f63c9efa39de after passing bootstrap tests/build/fmt/clippy, document checks, exact staged-scope review and targeted credential-pattern scanning. This approval includes the accompanying checkpoint-record update, not unrelated feature work. Push completion must be verified by comparing remote main with local HEAD. No PDF, browser binary, profile, secret, target or Hermes session artifact is included.
 
 #### DEC-003 — Desktop presentation acceptance
 
