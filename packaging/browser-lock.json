@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "distribution": "chrome-for-testing",
+  "channel": "Stable",
+  "version": "156.0.8078.47",
+  "revision": "1706539",
+  "platform": "linux64",
+  "metadata_url": "https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions-with-downloads.json",
+  "download_url": "https://storage.googleapis.com/chrome-for-testing-public/156.0.8078.47/linux64/chrome-linux64.zip",
+  "archive_sha256": "e6c94490f0b6b337225aeb2d2a5034858516b7017356980ba94f5176d8774a50",
+  "executable_sha256": "230f0db8c5086182f46c59c867c0d461eb525d6552dfad226ea6b4d9ec249db2",
+  "publisher_sha256": null,
+  "publisher_md5": "72fa68617cc55ecf4e2bbe697e2f7584",
+  "license_url": "https://www.google.com/chrome/terms/",
+  "verification_policy": "Development-only candidate from vendor HTTPS metadata; archive MD5 compared with separately retrieved Google Storage response headers. SHA-256 values are locally observed integrity pins, not independently published vendor SHA-256 or signatures. Production provenance policy needs owner review.",
+  "update_policy": "No runtime downloads or auto-updates. Refresh explicit version, metadata, local hashes and compatibility tests in a reviewed provisioning batch before use. Check current stable/security status before any real browsing.",
+  "redistribution_approved": false
+}

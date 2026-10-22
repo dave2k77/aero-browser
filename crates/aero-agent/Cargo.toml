@@ -1,0 +1,12 @@
+[package]
+name = "aero-agent"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+aero-core.workspace = true
+aero-cdp.workspace = true
+aero-perception.workspace = true
+aero-executor.workspace = true

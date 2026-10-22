@@ -1,0 +1,10 @@
+[package]
+name = "aero-executor"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+aero-core.workspace = true
+aero-cdp.workspace = true
