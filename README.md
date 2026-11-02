@@ -6,25 +6,33 @@ The goal is to let users delegate bounded browser tasks, inspect the resulting e
 
 ## Current status
 
-**Early development: bootstrap plus committed B01 core primitives. This is not yet a usable browser or an autonomous browsing agent.**
+**Early development: bootstrap and B01 committed; B02/B03/N01 contracts, B04–B06 storage, N02 task access and audit repairs implemented locally, uncommitted. N03 local budgets and N04 synthetic verification are ready for owner review. This is not yet a usable browser or an autonomous browsing agent.**
 
 Implemented:
 
 - A six-crate Rust workspace with a pinned toolchain and dependency lockfile.
 - An `aero` CLI with help, version information, and a `doctor` command.
-- Bounded executable/version probes and comparison against a recorded development browser byte pin.
+- Bounded executable/version and integrity probes, diagnostic process-group cleanup, and comparison against a recorded development browser byte pin.
 - Bootstrap tests, requirements traceability, architecture decisions, and contributor documentation.
 - B01 core primitives: six distinct string identifiers for targets, frames, CDP sessions, runtime/document generations and observations; exact string serialization; clipped CSS geometry; and separate validated frame-local/root-CSS/screenshot coordinate types.
+- B02 pure contracts (uncommitted): version-1 action/decision objects, object-only action parsing, typed observation references, parameter validation and payload-free validation errors. These proposals never grant execution permission.
+- B03 pure contracts (uncommitted): JSON-safe form values, distinct task/run/evidence/artifact references, versioned checkpoints with explicit capture completeness, and public status/usage/outcome events. These represent data; they do not capture, persist or restore a browser.
+- N01 TaskContract (uncommitted): strict versioned objectives/criteria/outputs, scoped intent, processing rules, bounded cumulative limits and explicit metadata. Validators do not grant authority, execute verifiers, persist revisions or start tasks.
+- B04 storage foundation (uncommitted): strict task-owned SQLite schema, transactional initialization, ownership/immutability constraints, corruption/version refusal, and a private single-owner opener.
+- B05 journal (uncommitted): bounded writer/async replies, transactional task/run records, pre-action reservations, atomic outcomes/checkpoints, conservative orphan recovery and paginated audit. No execution authority, encrypted snapshots or browser restoration.
+- B06 private state (uncommitted): XDG state layout, isolated task/run/runtime profile and staging directories, and cooperative task locks retained while runtime handles live. No browser/input dispatcher or automatic cleanup.
+- N02 task access (uncommitted): host-issued owner/model scopes, owner-only immutable revisions/run records, task-scoped history and transaction-local start checks. Accepted intent is draft and new runs are paused; no browser readiness or effect grants are implied.
+- N03 local accounting and N04 verifier registry (uncommitted): cumulative reservations and synthetic readback comparisons. The registry is not connected to real browser/artifact sources or a completion gate; serialized results do not prove provenance.
 
-Not implemented yet: browser process supervision and CDP transport, task execution, permission enforcement, durable task storage/recovery, model-provider integration, or a desktop interface. The library crates establish boundaries; their presence does not mean those subsystems work.
+Not implemented yet: browser process supervision and CDP transport, task execution, permission enforcement, encrypted/browser recovery, model-provider integration, or a desktop interface. The library crates establish boundaries; their presence does not mean those subsystems work.
 
 The intended first useful workflow is supplier research against deterministic local fixtures: produce an ordered CSV, a sourced comparison report, and a verified artifact manifest while identifying unknowns and avoiding account creation, submission, uploads, or purchases. This is a planned acceptance scenario, not a feature available today.
 
-### Latest checkpoint — 2026-10-22
+### Latest checkpoint — 2026-10-28
 
 Bootstrap and B01 are committed and pushed to `main`: `54e0a95` implements scoped identifiers and safe geometry; `1b2a3da` records the approved B01 checkpoint. Geometry tests cover visible intersections, invalid/nonfinite inputs, overflow and floating-point boundary rounding. Compile-fail tests check that identifiers and coordinate spaces cannot be implicitly mixed.
 
-Work is paused after B01. The next proposed batch is **B02: strict versioned action/decision contracts**, followed by B03 snapshots/events and N01 TaskContract before persistent journaling. B02 has not started and requires separate approval. See the [end-of-session handoff](docs/handoff.md#end-of-session-handoff) for restart instructions, remaining gates and publication state.
+B02/B03, audit repairs, N01–N04 and B04–B06 are implemented locally; nothing from these batches is committed. N03 accounting and N04's synthetic verifier registry are ready for owner review. N13/N16 have partial in-memory policy and filesystem-preflight foundations, not real transfer enforcement or complete deletion. N05 completion and N17/N18 repositories remain blocked after partial foundations. The previous README/handoff commit `af88105` remains local-only. See the [current handoff](docs/handoff.md#current-n13n16-work-in-progress) for review findings, verification and remaining limitations.
 
 ## Quickstart
 
@@ -33,6 +41,7 @@ Work is paused after B01. The next proposed batch is **B02: strict versioned act
 - Linux with a C compiler/linker and a Rust installation managed by rustup.
 - Rust **1.99.1**, with rustfmt and Clippy, as pinned in [`rust-toolchain.toml`](rust-toolchain.toml).
 - Git and access to the repository. The SSH clone command below requires GitHub SSH authentication.
+- Python 3 for the pin-check helper, shell-adapter tests and documentation checks; no `python` alias or pip packages are required.
 
 Rustup can provision the pinned toolchain when Cargo first runs. No Node.js, model provider, keyring, or browser binary is required to build and test the current bootstrap and core primitives.
 
@@ -75,9 +84,9 @@ cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo build --workspace --locked
 ```
 
-The latest verified application run on 2026-10-22 passed **25 behavior tests and five compile-fail doctests**, plus workspace build, formatting and warning-denied Clippy. Documentation checks also passed. The end-of-session README/handoff update is documentation-only; its checks are not a new application-test run.
+The N02 workspace run on 2026-10-26 passed **143 behavior tests and eleven compile-fail doctests**. Build, formatting, warning-denied Clippy and rustdoc pass. Nine N02 integration tests and three compile-fail proofs cover host-issued authority, model/cross-task denials, immutable history, persisted start checks, scope lifetime and sealed task-write APIs. No dependency or schema change was needed. These are local tests, not hosted CI, remote-peer authentication or real-browser qualification.
 
-These checks validate the implemented bootstrap and B01 core primitives, not delegated browsing, native sandbox behavior, or model quality. In particular, the types do not establish handle freshness, frame projection, DPR calibration, target hit testing or authorization. Required real-browser and native-platform suites will be introduced with their corresponding implementation; unavailable prerequisites must not silently count as a pass.
+These checks validate bootstrap, B01–B03/N01 pure contracts and B04–B06's storage boundaries, not delegated browsing, native sandbox behavior, model quality or working recovery. The types do not establish handle freshness, target hit testing or authorization. B02's URL guard is not a complete browser parser/network policy. B03's checkpoints hold private pre-encryption data, not plaintext SQL metadata; public-event structure is not sanitization of arbitrary ID strings. Trusted producers and future persistence/privacy/runtime owners remain necessary. Required real-browser/native suites will be introduced with their implementation; unavailable prerequisites must not silently count as a pass.
 
 ## Architecture
 

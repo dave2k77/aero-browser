@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted recovery semantics; implementation and crash/browser/keyring proof remain `not_started` in the [traceability matrix](../requirements.md). This ADR documents invariants, not executed recovery or future test results.
+Accepted recovery semantics; B04/B05 schema/private-open and local writer/step protocol have passing tests. Real crash/browser/keyring proof remains unimplemented in the [traceability matrix](../requirements.md). Local SQL atomicity is not evidence of remote exactly-once effects or browser restoration.
 
 ## Context
 
@@ -12,11 +12,13 @@ Accepted recovery semantics; implementation and crash/browser/keyring proof rema
 
 - One SQLite database and one bounded blocking writer own tasks, immutable contract revisions, cumulative counters/reservations, run history, intents/outcomes, grants/approvals, criteria, evidence/artifact metadata and checkpoints. Use the [canonical store/step contract](../implementation-plan.md#75-initial-schema--cratesaero-agentsrcstoremigrations001_initialsql), not duplicated SQL in this ADR.
 - `sessions` represent runs; Task is the durable owner. Resume, a new run, provider change or UI reconnect cannot reset action attempts, tokens/reservations, active execution time, recovery count, unresolved effects or history. Human-wait time is separate from active-time consumption. Unknown inference usage remains conservatively reserved until reconciliation; unknown price is not zero cost.
-- Contract changes create trusted-user-only immutable revisions. Grant payload/issuer/task/revision are immutable; expiry, revocation and quota consumption remain durable authority checks. Revalidate them on recovery; do not recreate grants from conversation history or blindly restore an approval from an old snapshot. Materially affected approvals/grants require revalidation or renewed human decision.
+- Contract changes create trusted-user-only immutable revisions. Grant identity/payload/issuer/task/revision/expiry are immutable; extending expiry requires a newly issued grant, not an UPDATE. Revocation and quota consumption remain durable authority checks. B04 constrains stored shapes and payload updates/replacement; it does not establish trusted issuance or prevent every delete/reinsert workflow. B05 invalidates grants/approvals when accepting a revision; N02/N03/N06 still own trusted issuance, quota/revocation lifecycle authorization and all runtime checks. Revalidate grants on recovery; do not recreate them from conversation history or blindly restore an approval from an old snapshot. Materially affected approvals/grants require revalidation or renewed human decision.
 - Reserve budget and a unique run-step slot in the writer transaction before external work. Persist prepared intent and increment the cursor/attempts once. Outcome/checkpoint/owned evidence/artifact metadata and status commit together afterward without a second cursor increment. Never infer the next step or counters solely from an older checkpoint.
 - Schema mismatch, corruption, disk failure, ownership mismatch and missing encryption key are typed failures, not deserialization-to-empty successful state. Greenfield initial schema design does not require a fictitious upgrade migration; real later versions migrate transactionally.
 
 ## Decision: prepared-intent uncertainty
+
+B05 classifies pre-existing prepared records only under exclusive Journal startup, before exposing clients. A normal load_resume rejects live prepared work instead of racing dispatch. Accepted requests still execute after a reply is dropped; callers reconcile durable state rather than assuming cancellation. New runs retire older active/paused runs without deleting history or resetting task counters. Unknown usage remains reserved, and ordinary commit cannot clear an uncertain record.
 
 A persisted prepared intent can exist before dispatch, during connection loss, after a server effect or during an interrupted outcome transaction. Without durable proof distinguishing these points, recovery must mark it uncertain and the task/run `needs_review`. **No automatic repeat**, including the apparent intent-before-dispatch case: the durable record alone cannot prove the remote effect never happened.
 

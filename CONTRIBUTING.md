@@ -1,6 +1,6 @@
 # Contributing to AeroBrowser
 
-Status: B01 pure primitives committed as 54e0a9573d8eb90746243f0f24056b05a3022988, 2026-10-22; see the [current handoff](docs/handoff.md#current-b01-checkpoint). After the review report, the user explicitly said “commit and push” for B01. Local main is linked to the private GitHub repository; verify current remote delivery from Git rather than this static snapshot. Browser execution, task/control/policy/store and native sandbox qualification remain future work. Every later batch still requires review and explicit commit/push approval.
+Status: B02/B03, audit repairs, N01–N04 and B04–B06 are implemented locally and uncommitted. N03 accounting and N04's synthetic verifier registry are ready for owner review; N13/N16 have partial in-memory gateway and lock-preflight foundations; N05 and N17/N18 remain blocked after partial foundations. None establishes real browser readiness. See the [current handoff](docs/handoff.md#current-n13n16-work-in-progress). B01 remains committed as 54e0a9573d8eb90746243f0f24056b05a3022988 after explicit user commit/push approval. Verify remote delivery from Git, not this snapshot. Execution/effect policy, adapter authentication, encryption and native qualification remain future work. Every uncommitted batch still requires explicit commit/push approval.
 
 ## 1. Read first and respect document authority
 
@@ -55,8 +55,17 @@ Expected red: the named test executes and its visible-intersection assertion fai
 - Begin with six Rust crates and minimal defaults. Pin the compiler and lock resolved dependencies; add a crate/feature only for a real boundary. Optional vault/Parquet/SOM/semantic-memory/MCP/desktop dependencies cannot inflate the minimal graph by accident.
 - Define shared fixture/checker modules before consumers. CLI must not import integration-test-only helpers. The explicit nondefault evaluation feature owns the runner/fixture server/scripted support; dependency-light manifest validation remains testable without it.
 - Preserve typed Task/Run/Target/Frame/session/epoch IDs. Never equate a transient browser handle with durable task identity or reuse stale handles after navigation/recovery/takeover.
+- Parse decision objects with the compiled core contract, then call `Decision::validate()` before trusted policy. Mandatory version 1 has no legacy fallback; mutable proposals and validation success are not executable authority. Keep schema generation deferred until a consumer needs it, and derive it from the same type rather than a second wire model.
+- Derived internally tagged enums can accept positional arrays, even inside map-only struct envelopes. Test direct and nested enum shapes, not only struct roots. The shared tagged-object helper now covers Action/FieldValue/EventKind; BUG-001's correction is authorized by accepted DEC-008 and protected by all-variant regressions. Do not infer unrelated feature/commit authority from that approval.
+- B03 objects require all declared fields, including explicit null for nullable fields; do not infer captured empty/false/null state from omitted data. Check original snapshot bytes before decoding and validate the same decoded value against a separately trusted RunContext. Reuse canonical durable IDs and verification statuses in N01/N04 rather than defining competing types.
+- N01 is intent data: parse original bytes and validate internal consistency, then use separately trusted prerequisites at start boundaries. Neither grants permission or proves readiness. Resolve grant/processor/export/account references through their trusted owners; source labels cannot declassify themselves. Empty route lists deny all routes; whole-origin scope is explicit "/", and later normalized matching is segment-bounded. Keep the plan's fixture equal to its compiled integration test rather than maintaining divergent schemas.
+- Store exposes only private single-owner opening/settings; B05's JournalClient queues trusted host operations with no raw SQL escape. The compiled migration remains the schema authority. Admission success or a dropped reply does not prove commit/cancellation; reconcile uncertain work before any retry. Start/close/drop join synchronously and belong on a blocking host thread. SQL object syntax, reported verification and ownership FKs are not issuance, permission, encryption or completion proof. Never open/close extra SQLite-owned inode descriptors during a live connection merely to inspect permissions; use no-follow metadata checks so POSIX locks are retained.
 
 ## 5. Security and privacy rules
+
+N02 TaskAuthority is host-root bootstrap, never an adapter-request parameter or model-facing tool. Give model adapters only their fixed TaskClient; do not expose Journal/raw storage, owner clients or authority-minting callbacks. Local task scope is not remote authentication or provider-egress permission. Contracts are draft and new run records paused until later runtime gates; current run status, historical checkpoint status and execution authority are separate facts.
+
+B06 leases are cooperative filesystem ownership, not permission to dispatch. Acquire Journal, task lease, then runtime directories; retain RuntimeDirs through consumer shutdown/join. Never detach path strings and assume they retain ownership, unlink locks, reuse epochs, or delete a run to reset task budgets. Persistent profiles/staging need future task-owned retention, not automatic cleanup on Drop.
 
 - Treat pages, provider responses, tool results, retrieved examples, and procedures as untrusted data, never authority.
 - An agent can request approval, not issue it. Trusted-human-only grants and caller roles are host-constructed, never selected through model JSON or model-callable MCP tools.
@@ -71,6 +80,8 @@ Expected red: the named test executes and its visible-intersection assertion fai
 - Keep Chromium's renderer sandbox and the tested host sandbox. Never add `--no-sandbox`, disable web security, widen mounts/capabilities, change sysctls/AppArmor, or write plaintext snapshots to make a test pass.
 - Pause cancels planning/read-only waits promptly, blocks later dispatch, and acknowledges exclusive input ownership after bounded input completion or explicit uncertainty. Resume takes a fresh observation.
 - Retention includes every currently implemented local derived store. Disclose that local deletion cannot recall external copies and live browser profiles can remain sensitive.
+- B02 validation errors contain only static field/reason strings. Raw serde errors and proposal Debug output may contain payload data; never treat them as sanitized logs. Its HTTP(S) shape guard does not replace parsing/resolution/effective-origin and data-flow checks at future URL consumers.
+- Form/checkpoint data is pre-encryption and has no raw Debug. Never persist the whole Checkpoint into plaintext metadata_json or publish it as an event; future store/encryption owners must split safe metadata and authenticated encrypted contents, failing closed without a key. Capture completeness is explicit producer report data, never inferred from an empty field list. Public-event shape does not sanitize arbitrary ID strings; trusted producers must enforce issuance/provenance/privacy.
 - A streamed image is not proof of native accessibility/IME/dialog support; collect actual native evidence before claiming a backend.
 
 A suspected active leak, unsafe dispatch, sandbox regression, duplicate external effect, or false success stops the affected path immediately. Create a sanitized S0/S1 tracker entry, preserve only necessary redacted evidence, and obtain review before resuming. Do not publish a vulnerability or raw browsing data to a public issue without approval. No security contact has been established yet; ask the project owner for an approved private channel rather than inventing one.
@@ -115,7 +126,7 @@ Expected: automated checks exit 0. Separately record real X11/Wayland, keyboard/
 Run this read-only check from the workspace root. It checks the living documentation links, fences, requirement mappings, and execution ledger without needing Rust or Git:
 
 ```bash
-python - <<'PY'
+python3 - <<'PY'
 from pathlib import Path
 from urllib.parse import unquote
 import re

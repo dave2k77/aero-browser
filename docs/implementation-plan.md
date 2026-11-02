@@ -1,6 +1,6 @@
 # AeroBrowser — task-first implementation plan and specification corrections
 
-Revision 2.3 — 2026-10-22. BATCH-00 and B01 primitives are committed; B01 is recorded in 54e0a9573d8eb90746243f0f24056b05a3022988 after explicit user commit/push approval. Authoritative product/technical requirements remain in [specification.md](specification.md); the original PDF is historical source. Tested core primitives/scaffolding/diagnostics do not imply task/browser subsystem completion or release readiness.
+Revision 2.9. B02/B03, audit repairs, N01–N04 and B04–B06 are implemented locally, uncommitted; N03 local accounting and N04's synthetic verifier registry are ready for owner review. N05 and N17/N18 remain blocked after partial foundations. See the [current N17/N18 handoff](handoff.md#current-n17n18-blocked-checkpoint) for real tests, review findings and remaining limits. BATCH-00 and B01 primitives remain committed; B01 is recorded in 54e0a9573d8eb90746243f0f24056b05a3022988 after explicit user commit/push approval. Authoritative product/technical requirements remain in [specification.md](specification.md); the original PDF is historical source. Tested contracts, storage and diagnostics do not imply task/browser subsystem completion or release readiness.
 
 ## Goal
 
@@ -63,13 +63,13 @@ The user approved the reviewed BATCH-00 commit/push. Root commit 5a4fac91e563873
 | A01 | committed | Documentation subagent; Hermes integrates | 5a4fac9: source/requirements/ADRs and traceability checks reviewed and approved; future suite/manual proof gaps remain explicit. No application-feature acceptance claimed. |
 | A02 | committed | User native setup / Hermes verifies | 5a4fac9 records verified bootstrap tooling/pins; installed Rust/browser/pkg-config remain external. ENV-003 resolved; ENV-002/ENV-004 native/runtime qualification remains unverified. |
 | A03 | committed | Hermes | 5a4fac9: six-crate workspace, core import red/green, lockfile; build/test/fmt/clippy pass. |
-| A04 | committed | Hermes | 5a4fac9: eight CLI tests and real development browser local-pin/helper checks. Baseline diagnostics only; runtime_ready=false and C04/native/production-provenance gates remain unverified. |
+| A04 | ready_for_review | Hermes | Baseline committed in 5a4fac9. Uncommitted BUG-002/003/004 repairs: signal group before leader reap via waitid/WNOWAIT, reject auto-reaping policy, Python3 helper/preflight, bounded integrity job. Five CLI unit, three helper and ten doctor tests pass; review ordering regression observed red/green. Existing locked libc 0.2.191 reused as explicit CLI edge; no package/version/download added. runtime_ready=false; C04/native/provenance gates unverified, no browser/host/account operation. |
 | B01 | committed | Hermes | 54e0a9573d8eb90746243f0f24056b05a3022988: reviewed pure IDs/geometry/coordinate primitives and synchronized documentation; user then said “commit and push.” Workspace: 25 behavior tests + five compile-fail doctests, build/fmt/Clippy and documentation gates rerun successfully before commit. [Evidence and limits](handoff.md#current-b01-checkpoint). No runtime handle map or browser/tasks/providers; verify remote delivery separately. |
-| B02 | not_started | — | — |
-| B03 | not_started | — | — |
-| B04 | not_started | — | — |
-| B05 | not_started | — | — |
-| B06 | not_started | — | — |
+| B02 | ready_for_review | Hermes | DEC-008 authorizes BUG-001's parser/test fix and existing-code audit. Shared map-only Action decoder; two tests observed red/green across all 18 direct/nested variants. Current core: 51 unit + one import + seven compile-fail; workspace: 70 behavior + seven compile-fail, build/fmt/Clippy/rustdoc/docs pass. [BUG-001](bug-fix-tracking.md#bug-001--b02-action-enum-accepts-positional-arrays) ready_for_review, no remaining identified pre-N01 code blocker. No staging/commit/push, runtime or core dependency change. |
+| B03 | ready_for_review | Hermes | Pure form/checkpoint/public-event slice, uncommitted: nominal references, mandatory versions/capture completeness, strict objects, static errors and scoped counters/inventory. Initial B03 record preserves its 48-unit/57-workspace proof and preservation scope historically; accepted DEC-008 now fixes the B02 sibling explicitly and adds systematic recovery/event rejection coverage. Current core 51 unit + one import + seven compile-fail; workspace 70 behavior + seven doctests and all gates pass. No browser/task/store/encryption/provider/UI or core dependency expansion. [Current evidence and stop boundary](handoff.md#current-pre-n01-audit-checkpoint); no staging/commit/push or N01. |
+| B04 | ready_for_review | Hermes | Strict task-owned schema/private opener, bundled rusqlite 0.41.0; required schema test and schema-prefix/ancestry regressions observed red/green. Two module + fifteen journal tests; workspace 104 behavior + eight compile-fail, build/fmt/Clippy/rustdoc/docs pass. Design/source reviews integrated; prior core/audit source preserved. [Evidence and limits](handoff.md#current-b04-checkpoint). No B05 queue/prepare/commit, runtime/crypto/browser or staging/commit/push. |
+| B05 | ready_for_review | Hermes | Bounded writer, async replies, atomic task/run/prepare/commit/load/delete; directional reservations, startup orphan review, metadata-only checkpoint, strict bounded audit. Required atomic test and six design/source hardening regressions observed red/green; 13 module +26 journal tests, workspace 126 behavior +8 compile-fail, all quality gates pass. Source review integrated, prior core/CLI preserved; worker_tests.rs contains private injection/lifecycle tests. [Evidence and limits](handoff.md#current-b05-checkpoint). No B06, execution/crypto or commit/push. |
+| B06 | ready_for_review | Hermes | Private XDG state and task/run/epoch directories, cooperative task flock retained by runtime handles; no epoch reuse or implicit cleanup. Required lock assertion red/green, eight B06 tests including cross-process and concurrent epochs; workspace 134 behavior +8 compile-fail and quality gates pass. Design/source review complete; worker/schema/core/CLI preserved. Existing sha2 0.10.9 edge only. [Evidence and limits](handoff.md#current-b06-checkpoint). No N02, runtime/crypto, deletion or commit/push. |
 | C01 | not_started | — | — |
 | C02 | not_started | — | — |
 | C03 | not_started | — | — |
@@ -136,11 +136,11 @@ The user approved the reviewed BATCH-00 commit/push. Root commit 5a4fac91e563873
 | J04 | not_started | — | — |
 | J05 | not_started | — | — |
 | J06 | not_started | — | — |
-| N01 | not_started | — | — |
-| N02 | not_started | — | — |
-| N03 | not_started | — | — |
-| N04 | not_started | — | — |
-| N05 | not_started | — | — |
+| N01 | ready_for_review | Hermes | Approved “Alright, let's move on” after pre-N01 audit. task.rs/lib.rs/tests/task_contract.rs implements strict version-1 TaskContract with spec §4 metadata, fixed verifier criteria, output relationships, bounded budgets/scopes and host prerequisite checks. Required roundtrip and review stop/export/IPv6/row-count regressions observed red/green. Final 17 integration tests; workspace 87 behavior + eight compile-fail; build/fmt/Clippy/rustdoc/docs pass. Read-only design/source review findings parent-integrated; prior audit source/dependencies/specification preserved. No runtime/store/provider, dependency change or staging/commit/push. [Evidence and limits](handoff.md#current-n01-checkpoint). |
+| N02 | ready_for_review | Hermes | Host-issued owner/task-scoped model clients; sealed task writes, transaction-local persisted start checks, immutable revisions/history/invalidation. Contracts draft and new run records paused; current status distinct from checkpoint. Required owner/start/readiness assertions red/green; nine task integration +three compile-fail proofs. Workspace 143 behavior +11 compile-fail and quality gates pass; design/source review integrated. [Evidence and limits](handoff.md#current-n02-checkpoint). Config/schema/core/CLI/dependencies preserved; no N03, runtime/grant issuance or commit/push. |
+| N03 | ready_for_review | Hermes | Approved continuation: task-wide action/work reservations, known/unknown inference and separate purchase accounting, active-time helper, durable settlement/reconciliation and conservative overrun review. Integrating-parent workspace: 172 behavior +11 compile-fail; fmt/Clippy/build/rustdoc pass. Independent reviews found issues fixed with observed regressions; last two repairs were parent-reviewed/tested, not independently re-reviewed. Local accounting only: real dispatch/deadlines, bounded history performance and native qualification remain future. Unshipped schema changed; older databases are refused, not reset or migrated. [Evidence and limits](handoff.md#current-n03-checkpoint). No staging/commit/push. |
+| N04 | ready_for_review | Hermes | User-approved synthetic registry and typed reports; seven integration tests, including independent fake dispatch/readback and planner API/JSON rejection; one compile-fail boundary proof. Independent review found dispatch fixture gap; parent repaired and tested. Workspace 179 behavior +12 compile-fail and quality gates pass. Real adapters, source freshness/ownership, output-name binding, evidence coverage, ingress and N05 gate remain future; decoded reports are forgeable. [Evidence and limits](handoff.md#current-n04-checkpoint). No staging/commit/push. |
+| N05 | blocked | Hermes | Owner approved N05; pure predicate red/green and narrow journal noncompletion regression pass. Full gate cannot safely finalize without N17/N18 trusted evidence/artifact readbacks and an authorized attestation design. [DEC-009](bug-fix-tracking.md#dec-009--n05-prerequisite-scope) and [checkpoint](handoff.md#current-n05-checkpoint) preserve in_progress state and remaining work. No production completion transition, staging or commit. |
 | N06 | not_started | — | — |
 | N07 | not_started | — | — |
 | N08 | not_started | — | — |
@@ -148,12 +148,12 @@ The user approved the reviewed BATCH-00 commit/push. Root commit 5a4fac91e563873
 | N10 | not_started | — | — |
 | N11 | not_started | — | — |
 | N12 | not_started | — | — |
-| N13 | not_started | — | — |
+| N13 | blocked | Hermes | In-memory host-issued purpose-scoped gateway tested with fake transport; real transport, trusted source/grant ownership, lifecycle wiring and no-bypass integration remain absent. Follow-up poison/cycle fix is tested but not independently re-reviewed. |
 | N14 | not_started | — | — |
 | N15 | not_started | — | — |
-| N16 | not_started | — | — |
-| N17 | not_started | — | — |
-| N18 | not_started | — | — |
+| N16 | blocked | Hermes | Filesystem preflight only: retains fresh lock and always remains blocked on unknown holds/journal state. SQL-only deletion does not stop artifact writers. Proposed coordinated deletion requires trusted holds, admission closure, durable tombstones, privacy/cutover decisions and preserving schema strategy; no real deletion or migration. |
+| N17 | blocked | Hermes | Synthetic exact fact comparison is tested but caller-constructible and not provenance authority. Blocked on real observation capture, trusted classification, immutable repository/freshness and outcome transaction with a preserving database strategy. No database reset or migration authorized. |
+| N18 | blocked | Hermes | Private task-lease-bound byte staging and digest-checked reopen exist with classification-as-trusted-caller-assertion only. Blocked on N13 policy, N16 retention, evidence, durable bundle/journal reconciliation and safe export; independent review found no remaining confirmed defect in its snapshot. |
 | N19 | not_started | — | — |
 | N20 | not_started | — | — |
 | N21 | not_started | — | — |
@@ -479,128 +479,89 @@ The snippets in this section belong **inside future files**. They are not execut
 
 The model supplies an observation ID with every decision; handles are opaque strings scoped to that observation. Trusted envelopes supply Task/Run/contract revision/caller role; model JSON cannot elevate them. No browser node/session IDs are exposed to the model. Add action variants only when their executor/policy/verification tests exist. `Complete` is a criterion-evaluation proposal, never a direct task-success setter.
 
-```rust
-use serde::{Deserialize, Serialize};
+The compiled [action/decision module](../crates/aero-core/src/actions.rs) now owns the Rust definitions and their unit tests; do not maintain an uncompiled second implementation here. B02 defines the preplanned vocabulary only. No variant is enabled for dispatch until its later executor/policy/verification gates pass.
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
-pub enum Action {
-    Click { target: String },
-    Type { target: String, text: String, clear: bool, press_enter: bool },
-    Select { target: String, values: Vec<String> },
-    SetChecked { target: String, checked: bool },
-    PressKey { key: String },
-    Scroll { target: Option<String>, delta_x: f64, delta_y: f64 },
-    Navigate { url: String },
-    NewTab { url: String },
-    SwitchTab { tab: String },
-    CloseTab { tab: String },
-    FillCredentials { username_target: String, password_target: String },
-    FillTotp { target: String },
-    ExtractData { target: String, columns: Vec<String>, limit: u32, format: String },
-    DownloadFile { target: String },
-    BatchMetadata { urls: Vec<String> },
-    Wait { milliseconds: u32 },
-    AskUser { question: String },
-    Complete { summary: String },
-}
+BUG-001 audit correction under accepted DEC-008: Action now reuses the same map-only tagged decoder as FieldValue/EventKind. Two repository regressions were observed red then green across all 18 direct/nested positional variants. Valid object data, optional/null scroll target semantics, Debug/PartialEq and parameter validation remain unchanged. The prior B03 preservation boundary is historical; the new user authorization explicitly permits this parser repair. This is not authorization to dispatch proposals or start N01.
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Decision {
-    pub observation_id: String,
-    pub rationale: String,
-    pub action: Action,
-}
+Required decision fields are `schema_version` (integer 1), `observation_id` (the existing string-backed `ObservationId`), `rationale` (public string), and one `action` object. Unknown/missing/wrong-type fields, duplicate known fields and unknown action tags fail deserialization; an omitted optional scroll target means viewport scrolling, as does explicit null. Version is mandatory, has no default, and is rejected at deserialization unless exactly 1; `validate()` checks it again for Rust-constructed/mutated proposals. No legacy unversioned fallback is supported for this unshipped contract.
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn decision_is_strict_and_round_trips() {
-        let raw = r#"{"observation_id":"obs-1","rationale":"Open result","action":{"action":"click","target":"@e0"}}"#;
-        let decision: Decision = serde_json::from_str(raw).unwrap();
-        assert_eq!(decision.observation_id, "obs-1");
-        assert_eq!(decision.action, Action::Click { target: "@e0".into() });
-        let encoded = serde_json::to_string(&decision).unwrap();
-        assert_eq!(serde_json::from_str::<Decision>(&encoded).unwrap(), decision);
-        let bad = r#"{"observation_id":"obs-1","rationale":"x","action":{"action":"click","target":"@e0","javascript":"alert(1)"}}"#;
-        assert!(serde_json::from_str::<Decision>(bad).is_err());
-    }
-}
+```json
+{"schema_version":1,"observation_id":"obs-1","rationale":"Open result","action":{"action":"click","target":"@e0"}}
 ```
 
-The JSON fixtures above are complete one-line raw strings. No `auto_submit` option exists on vault actions. Submission is a separate policy-gated action.
+The action object uses a strict snake-case `action` tag:
+
+| Tag | Parameters besides the tag |
+|---|---|
+| `click` | `target`: string |
+| `type` | `target`, `text`: strings; `clear`, `press_enter`: required booleans |
+| `select` | `target`: string; `values`: string array (including empty/Unicode values) |
+| `set_checked` | `target`: string; `checked`: required boolean |
+| `press_key` | `key`: named-key string |
+| `scroll` | `target`: optional string/null; `delta_x`, `delta_y`: numbers |
+| `navigate`, `new_tab` | `url`: string |
+| `switch_tab`, `close_tab` | `tab`: opaque string |
+| `fill_credentials` | `username_target`, `password_target`: strings, never credential plaintext |
+| `fill_totp` | `target`: string, never an OTP value |
+| `extract_data` | `target`, `format`: strings; `columns`: ordered string array; `limit`: u32 |
+| `download_file` | `target`: string |
+| `batch_metadata` | `urls`: string array |
+| `wait` | `milliseconds`: u32 |
+| `ask_user` | `question`: string |
+| `complete` | `summary`: public string |
+
+No `auto_submit` option exists on vault actions. Submission is a separate policy-gated action. Neither accepting a `parquet` proposal nor defining vault/tab/download variants implements their optional/gated runtimes.
 
 Validation beyond deserialization is mandatory: allow only known key names, `http`/`https` navigation (plus internal `about:blank`), finite scroll deltas bounded to ±4000, type text ≤16 KiB, wait ≤5000 ms, extraction limit 1–10000, batch length 1–64, rationale ≤1024 characters, summary ≤8192 characters, and only `csv`/`parquet` export formats. A model never supplies a host output path.
 
+B02's precise validation rules and proof boundary:
+
+- Typed text counts UTF-8 bytes; rationale/summary count Unicode scalar values, not grapheme clusters. Numeric and size bounds above are inclusive. Empty typed text remains valid for clearing; false booleans and empty selection values are preserved.
+- Named keys are exactly `Enter`, `Tab`, `Escape`, `Backspace`, `Delete`, `ArrowUp`, `ArrowDown`, `ArrowLeft`, `ArrowRight`, `Home`, `End`, `PageUp`, `PageDown`, `Space`. `Space` is the canonical wire name for the space key; D03 must map it explicitly to the native/browser key event. Arbitrary text, modifier chords, aliases and function keys are rejected; future extensions need matching input/policy tests. Executor-internal clear shortcuts are not model-supplied key names.
+- Observation/element/tab references must be nonempty but are otherwise opaque and preserved exactly. This does not prove issuance, current membership, ownership or freshness.
+- Both navigation variants allow exactly `about:blank` as the internal exception. Batch metadata requires HTTP(S) for every member, with no `about:blank`. The shared dependency-free syntax guard requires an explicit HTTP(S) `://` scheme; ASCII DNS labels (1–63 bytes, total host ≤253 excluding an optional terminal dot), canonical dotted IPv4 or bracketed IPv6 parsed by `std::net`; optional nonempty decimal ports within u16; and complete two-hex-digit percent escapes. Userinfo, whitespace/control/backslash repair, browser IPv4 shortcuts, malformed authorities and ports are rejected. Unicode paths remain accepted; raw Unicode hosts and zone-qualified IPv6 are deliberately unsupported rather than silently rewritten (internationalized hosts need an already encoded ASCII IDNA form). Accepted bytes are preserved. This conservative syntax subset is not complete WHATWG/IDNA parsing, DNS validation, canonical-origin comparison, redirect/SSRF or egress policy. Later adapters must parse/resolve and policy-check the effective destination before any transfer/dispatch.
+- Callers must deserialize directly from the original response bytes and then call `Decision::validate()` before trusted policy. An intermediate JSON Value/map can erase duplicate keys and is not a substitute for strict typed parsing. `Action::validate()` checks only action parameters. Neither result is an executable capability; public proposals can be mutated and need revalidation at their consumer boundary. Transport/provider payload-size caps and privacy classification remain later owners; B02 does not claim to bound every allocated JSON string/array or sanitize arbitrary proposal text.
+- `ValidationError` contains static field/reason strings only and does not echo payload values. Raw serde errors and derived proposal Debug output are not sanitized audit records and must not be logged as such.
+
+Required tests remain `decision_is_strict_and_round_trips`, `decision_rejects_limits`, `decision_rejects_unknown_action`; the module additionally tests every action shape, versions, missing/wrong/duplicate fields, exact bounds/Unicode, both scroll axes/nonfinite values, all URL-bearing variants, named keys, opaque references and payload-free validation errors. See the [B02 checkpoint](handoff.md#current-b02-checkpoint) for observed red/green, not expected output.
+
 ### 7.2 JSON-safe form model — `crates/aero-core/src/form.rs`
 
-```rust
-use serde::{Deserialize, Serialize};
+The compiled [form module](../crates/aero-core/src/form.rs) owns the definitions and executable fixtures. The prior uncompiled example reused a checkbox locator for Text; it is superseded by distinct matching locators in the actual test. No second Rust implementation is maintained here.
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct FieldLocator {
-    pub frame_path: Vec<String>,
-    pub origin: String,
-    pub document_url: String,
-    pub shadow_hosts: Vec<String>,
-    pub form_selector: Option<String>,
-    pub field_selector: String,
-    pub tag: String,
-    pub input_type: String,
-    pub name: Option<String>,
-}
+| Model | Wire fields / semantics |
+|---|---|
+| `FieldLocator` | `frame_path`, `origin`, `document_url`, `shadow_hosts`, `form_selector`, `field_selector`, `tag`, `input_type`, `name`. Paths are ordered string arrays; nullable selector/name fields are present explicitly as string/null. An empty name is valid. |
+| `FieldValue` | Strict `kind` tag: `text {value}`, `checkbox {checked}`, `radio_group {selected_value}`, `select {values}`. Empty text, false, radio-none/null, selected empty string and empty/multiple selections remain distinct. |
+| `FormFieldEntry` | `locator` plus `value`, never an object with a structural JSON key. |
+| `FormSnapshot` | Required `fields` array, including an explicitly empty array. Nested under the versioned checkpoint; it has no independent legacy/default version. |
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
-pub enum FieldValue {
-    Text { value: String },
-    Checkbox { checked: bool },
-    RadioGroup { selected_value: Option<String> },
-    Select { values: Vec<String> },
-}
+`FormSnapshot::validate()` rejects >2,000 entries, duplicate exact locators, empty required locator components/path segments and incompatible control/value metadata. Checkbox/radio require matching input types; select requires select-one (at most one value) or select-multiple; Text requires a textarea/textarea or an input other than checkbox/radio/file/password/hidden/button/submit/reset/image. HTML tag/type comparison ignores ASCII case without rewriting stored bytes. This is structural compatibility, not a live DOM query, selector-equivalence proof or full capture/privacy policy: F01/F02/F03 still classify OTP/card/echoed secrets, hidden/disabled/readonly controls, resolve groups and confirm actual values. There is no raw Debug implementation for these pre-encryption aggregates; the compile-fail test protects that boundary. Serialize is not permission to persist or publish private contents.
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct FormFieldEntry {
-    pub locator: FieldLocator,
-    pub value: FieldValue,
-}
+#### B03 compiled checkpoint and event contracts
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct FormSnapshot {
-    pub fields: Vec<FormFieldEntry>,
-}
+The compiled [checkpoint module](../crates/aero-core/src/checkpoint.rs), [event module](../crates/aero-core/src/events.rs), existing [ID module](../crates/aero-core/src/ids.rs) and private [wire helper](../crates/aero-core/src/wire.rs) own the remaining B03 definitions/tests. The helpers declare each schema once: `strict_object!` generates struct map-only deserialization and optional version checks; `strict_tagged_object!` gates the tagged enums through map visitation before a generated serde remote decoder enforces tags/duplicate/unknown/required fields. Derived internally tagged enums alone also accept positional arrays, so their map-only gate is mandatory, not just a surrounding-struct check. Every declared B03 struct field is required; nullable values use explicit null. Direct typed parsing must consume original bytes rather than an intermediate map that can discard duplicate keys. B02's valid wire/omission semantics are unchanged; its Action decoder now uses the same map-only tagged helper under accepted DEC-008 to close BUG-001.
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+| Model | Fields / contract |
+|---|---|
+| Nominal references | `TaskId`, `RunId`, `EvidenceId`, `ArtifactId` extend the existing opaque string wrappers. They are distinct from each other and browser IDs; no issuer, ownership, freshness or authority is inferred. |
+| `RunContext` | `task_id`, `run_id`, positive `contract_revision`. `validate_for(expected)` compares all three against a separately trusted expected context, not a value copied from the same input. N01 still owns TaskContract. |
+| `CumulativeUsage` | `attempts_spent`, `tokens_spent`, `tokens_reserved`, `active_ms_spent`, `recovery_count`: cumulative task counters from §7.5, not resettable per-run allowances, token-price estimates or budget reservations implemented by this DTO. |
+| `RunStatus` | The existing SQL vocabulary: running, awaiting_user, paused, needs_review, completed, failed, cancelled. A report does not authorize or perform a state transition. |
+| `DocumentSnapshot` | Typed `frame_id`, `document_epoch`, `observation_id`; `origin`, `document_url`, `form`. Origin must appear in captured inventory; every form locator's origin/URL must exactly match its enclosing document. |
+| `TabSnapshot` | Typed `target_id` and `documents`; unique target identities and unique frames within each tab. These captured transient IDs cannot be reused as fresh recovery handles. |
+| `Checkpoint` | Required `schema_version=1`, `context`, `step`, `next_step`, `usage`, `status`, `capture_status`, `runtime_epoch`, `captured_origins`, `tabs`, `evidence_ids`, `artifact_ids`. `capture_status` is explicitly complete/partial/nonresumable, with no inferred complete default for empty forms. |
+| `PublicEvent` | Required `schema_version=1`, `context`, positive per-run `sequence`, `kind`, `evidence_ids`, `artifact_ids`. Kind is strict status_changed {status}, usage_updated {usage}, or step_outcome {step, dispatch_state, verification_status}. |
 
-    #[test]
-    fn form_json_preserves_empty_and_false() {
-        let locator = FieldLocator {
-            frame_path: vec![], origin: "https://merchant.test".into(),
-            document_url: "https://merchant.test/form".into(),
-            shadow_hosts: vec!["#profile-widget".into()],
-            form_selector: None, field_selector: "#notify".into(),
-            tag: "input".into(), input_type: "checkbox".into(), name: None,
-        };
-        let snapshot = FormSnapshot { fields: vec![
-            FormFieldEntry { locator: locator.clone(), value: FieldValue::Checkbox { checked: false } },
-            FormFieldEntry { locator, value: FieldValue::Text { value: String::new() } },
-        ] };
-        let json = serde_json::to_string(&snapshot).unwrap();
-        assert!(json.contains("\"fields\":["));
-        assert_eq!(serde_json::from_str::<FormSnapshot>(&json).unwrap(), snapshot);
-    }
-}
-```
+Checkpoint/event versions are mandatory integer 1, rejected at deserialization if missing, wrong type or unsupported, and checked again in semantic validators for constructed/mutated values. Counters/revisions/sequences use nonnegative integers bounded by `i64::MAX`; revisions, event sequence and event step are positive. Checkpoint step may be zero, next_step must exceed step and task attempts must cover next_step-1. Do not require next_step=step+1: durable prepared reservations may leave a gap. Spent+reserved tokens must fit the counter range. DTO checks do not prove monotonic history, reconcile usage or replace the journal; B05/N02/N03 remain the trusted cumulative owners.
 
-Do not use this model's `Debug` output in logs: it represents pre-encryption browser data. A later privacy task replaces or restricts `Debug` on sensitive aggregate types. The example test must remain valid after that restriction.
+Checkpoint validation rejects >8 tabs, >20 captured origins or >2,000 total form entries across documents, empty/duplicate references, ambiguous inventory and scope mismatches without truncating. `check_snapshot_size(original_bytes)` checks the actual ≤2 MiB encoded-byte bound before decoding; consumers must decode/validate that same input. This pure helper does not read storage or parse JSON, so bypassing it is not automatically prevented by a runtime adapter that does not yet exist. F02/F05/N19 must report capture limits/unsupported controls through explicit partial/nonresumable state and recovery reports, never infer completeness from an empty list; B03's completeness enum is producer report data, not proof capture ran.
+
+The entire Checkpoint contains private form values and URLs. **Do not serialize it wholesale into SQL metadata_json or public events.** B04/B05/F01/F05 own the safe metadata/encrypted payload split and authenticated binding, with no plaintext fallback; B03 adds no encryption or persistence. Captured-origin membership is internal consistency, not origin authorization or URL/redirect validation. Actual record ownership, browser freshness and current permissions still require their trusted consumers.
+
+Public events have no raw form/action/rationale/diagnostic/credential/grant/role fields. Dispatch status (not_dispatched/dispatched/uncertain) is separate from verification status (not_checked/passed/failed/inconclusive); uncertain+passed is rejected, while dispatched+not_checked is ordinary valid report data. NotDispatched permits all four verification reports: a trusted verifier may independently check an already-satisfied or failed postcondition without dispatching an action. This does not claim an action happened or authorize completion. This is a structural boundary, not a guarantee against secrets in arbitrary ID strings: trusted producers must issue/resolve references and apply privacy/provenance policy. Completed or Passed report values cannot serve as a model-callable success setter. N04/N05/N08/E02 still own verification, completion, provenance, durable event ordering and reconnect delivery. N04 reuses `events::VerificationStatus` instead of adding a competing enum; N01 reuses the durable IDs.
+
+Named B03 proofs include `form_json_preserves_empty_and_false`, `form_objects_are_strict_at_every_level`, `form_value_requires_compatible_control_metadata`, `checkpoint_version`, `checkpoint_capture_completeness_is_explicit`, checkpoint context/counter/inventory/encoded-size rejections, and all `public_event_` tests. Their actual red/green and gate results belong in the [B03 handoff](handoff.md#current-b03-checkpoint), not in expected-output claims. No browser capture/hydration, TaskContract, store, encryption/keyring, event transport or provider/UI implementation is included.
 
 ### 7.3 Coordinate invariant — `crates/aero-core/src/types.rs`
 
@@ -710,136 +671,45 @@ Filesystem writes use a controller-created private directory and generated artif
 
 ### 7.5 Initial schema — `crates/aero-agent/src/store/migrations/001_initial.sql`
 
-The database is unshipped: replace the initial design now instead of adding a fictitious upgrade migration. `tasks` owns cumulative budgets; `sessions` are runs of an immutable contract revision. The single writer validates revision/schema/cross-record ownership before transactions.
+The unshipped version-1 schema is now owned by the compiled [initial migration](../crates/aero-agent/src/store/migrations/001_initial.sql), [store opener](../crates/aero-agent/src/store/mod.rs), and [journal integration tests](../crates/aero-agent/tests/journal.rs), not a second illustrative SQL copy. `tasks` owns cumulative budgets; `sessions` are runs of an immutable contract revision. Bundled rusqlite 0.41.0 is enabled with default features disabled; the root/agent manifests and lockfile are part of B04.
 
-```sql
-PRAGMA foreign_keys = ON;
-CREATE TABLE tasks (
-    id TEXT PRIMARY KEY,
-    status TEXT NOT NULL CHECK(status IN
-      ('draft','ready','running','awaiting_user','paused','needs_review','completed','failed','cancelled')),
-    attempts_spent INTEGER NOT NULL DEFAULT 0 CHECK(attempts_spent >= 0),
-    tokens_spent INTEGER NOT NULL DEFAULT 0 CHECK(tokens_spent >= 0),
-    tokens_reserved INTEGER NOT NULL DEFAULT 0 CHECK(tokens_reserved >= 0),
-    active_ms_spent INTEGER NOT NULL DEFAULT 0 CHECK(active_ms_spent >= 0),
-    recovery_count INTEGER NOT NULL DEFAULT 0 CHECK(recovery_count >= 0),
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-);
-CREATE TABLE task_contracts (
-    task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
-    revision INTEGER NOT NULL CHECK(revision >= 1),
-    schema_version INTEGER NOT NULL CHECK(schema_version = 1),
-    contract_json TEXT NOT NULL,
-    created_at TEXT NOT NULL,
-    PRIMARY KEY(task_id, revision)
-);
-CREATE TRIGGER immutable_contract BEFORE UPDATE ON task_contracts
-BEGIN SELECT RAISE(ABORT, 'task contract revisions are immutable'); END;
-CREATE TABLE capability_grants (
-    id TEXT PRIMARY KEY,
-    task_id TEXT NOT NULL,
-    contract_revision INTEGER NOT NULL,
-    issued_by TEXT NOT NULL,
-    grant_json TEXT NOT NULL,
-    expires_at TEXT NOT NULL,
-    revoked INTEGER NOT NULL DEFAULT 0 CHECK(revoked IN (0,1)),
-    quota_used INTEGER NOT NULL DEFAULT 0 CHECK(quota_used >= 0),
-    FOREIGN KEY(task_id, contract_revision)
-      REFERENCES task_contracts(task_id, revision) ON DELETE CASCADE
-);
-CREATE TRIGGER immutable_grant_payload
-BEFORE UPDATE OF task_id, contract_revision, issued_by, grant_json ON capability_grants
-BEGIN SELECT RAISE(ABORT, 'capability grant payload is immutable'); END;
-CREATE TABLE sessions (
-    id TEXT PRIMARY KEY,
-    task_id TEXT NOT NULL,
-    contract_revision INTEGER NOT NULL,
-    goal TEXT NOT NULL,
-    status TEXT NOT NULL CHECK(status IN
-      ('running','awaiting_user','paused','needs_review','completed','failed','cancelled')),
-    next_step INTEGER NOT NULL DEFAULT 1 CHECK(next_step >= 1),
-    attempts INTEGER NOT NULL DEFAULT 0 CHECK(attempts >= 0),
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-    FOREIGN KEY(task_id, contract_revision)
-      REFERENCES task_contracts(task_id, revision) ON DELETE CASCADE
-);
-CREATE TABLE actions (
-    session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-    step INTEGER NOT NULL CHECK(step >= 1),
-    observation_id TEXT NOT NULL,
-    action_json TEXT NOT NULL,
-    state TEXT NOT NULL CHECK(state IN ('prepared','committed','uncertain','failed')),
-    public_rationale TEXT NOT NULL,
-    outcome_json TEXT,
-    created_at TEXT NOT NULL,
-    PRIMARY KEY(session_id, step)
-);
-CREATE TABLE budget_reservations (
-    id TEXT PRIMARY KEY,
-    task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
-    session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-    reservation_json TEXT NOT NULL,
-    state TEXT NOT NULL CHECK(state IN ('reserved','settled','uncertain')),
-    created_at TEXT NOT NULL
-);
-CREATE TABLE checkpoints (
-    session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-    step INTEGER NOT NULL CHECK(step >= 0),
-    schema_version INTEGER NOT NULL CHECK(schema_version = 1),
-    metadata_json TEXT NOT NULL,
-    snapshot_nonce BLOB,
-    snapshot_ciphertext BLOB,
-    key_id TEXT,
-    created_at TEXT NOT NULL,
-    CHECK((snapshot_ciphertext IS NULL AND snapshot_nonce IS NULL AND key_id IS NULL)
-       OR (snapshot_ciphertext IS NOT NULL AND snapshot_nonce IS NOT NULL AND key_id IS NOT NULL)),
-    PRIMARY KEY(session_id, step)
-);
-CREATE TABLE approvals (
-    id TEXT PRIMARY KEY,
-    session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-    task_id TEXT NOT NULL,
-    contract_revision INTEGER NOT NULL,
-    observation_id TEXT NOT NULL,
-    material_effect_digest TEXT NOT NULL,
-    preview_json TEXT NOT NULL,
-    origin TEXT NOT NULL,
-    expires_at TEXT NOT NULL,
-    consumed INTEGER NOT NULL DEFAULT 0 CHECK(consumed IN (0,1)),
-    FOREIGN KEY(task_id, contract_revision)
-      REFERENCES task_contracts(task_id, revision) ON DELETE CASCADE
-);
-CREATE TABLE evidence (
-    id TEXT PRIMARY KEY,
-    task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
-    session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-    metadata_json TEXT NOT NULL,
-    created_at TEXT NOT NULL
-);
-CREATE TABLE artifacts (
-    id TEXT PRIMARY KEY,
-    task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
-    session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-    metadata_json TEXT NOT NULL,
-    created_at TEXT NOT NULL
-);
-CREATE TABLE criterion_results (
-    task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
-    contract_revision INTEGER NOT NULL,
-    criterion_id TEXT NOT NULL,
-    session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-    status TEXT NOT NULL CHECK(status IN ('not_checked','passed','failed','inconclusive')),
-    result_json TEXT NOT NULL,
-    PRIMARY KEY(task_id, contract_revision, criterion_id, session_id),
-    FOREIGN KEY(task_id, contract_revision)
-      REFERENCES task_contracts(task_id, revision) ON DELETE CASCADE
-);
-PRAGMA user_version = 1;
-```
+B04's implemented schema/open boundary:
 
-On open: private owner-only directory/file, `foreign_keys=ON`, `journal_mode=WAL`, `synchronous=FULL`, `busy_timeout=5000`. Refuse unsupported schema; future real upgrades migrate transactionally. One blocking thread owns `rusqlite::Connection`; bounded async requests receive oneshot replies; no `MutexGuard` across await. Cross-table task/session ownership is validated in the writer, not trusted from an adapter payload. Structured private content in contract/evidence/artifact metadata must follow the task's sensitivity/encryption/retention policy; secret payloads never enter these plaintext metadata columns.
+- Eleven STRICT tables; explicit non-null/nonempty identities, integer bounds/status checks, nonoverflowing combined token counters, syntactic JSON objects and complete nonempty nonce/ciphertext/key triples. These checks are not N01 semantic validation, encryption, payload-size limits, criterion existence or trusted grant issuance.
+- Composite foreign keys bind reservations/evidence/artifacts to their run's task and approvals/results to its exact revision. Task/run identity and contract updates are immutable; contract replacement/individual deletion and task/run replacement are rejected. Grant identity, payload and expiry updates/replacement are rejected. Owned task deletion cascades in SQL; this is not the later application-wide retention/cleanup API.
+- Only an empty version-zero/application-zero database is initialized. DDL, AERO application identity and user_version=1 commit in one transaction. Integrity, foreign-key consistency and exact supported schema identity are checked on open; unknown/foreign/partial/corrupt databases are refused without reset or invented upgrades. Initialization failure rolls back tables and version markers.
+- Linux absolute dedicated directory, no symlink component traversal, trusted non-writable ancestors (root-owned sticky directories allowed), owned 0700 leaf and owned single-link regular 0600 database/lock/sidecars. Existing permissions are refused rather than repaired. Only a missing final directory is created; no global umask change. Directory-relative creation anchors access; SQLite receives a fixed name under a retained /proc/self/fd directory reference. This requires Linux procfs and a local filesystem supporting SQLite/WAL and advisory locks, not hostile same-UID/root protection.
+- A nonblocking cooperative flock excludes another Store owner and is retained until after connection drop. foreign_keys=ON, journal_mode=WAL, synchronous=FULL, busy_timeout=5000, trusted_schema=OFF and recursive_triggers=ON. Sidecar metadata checks never open/close an extra SQLite-owned inode, avoiding release of process-wide POSIX locks. Public errors contain static categories, never database messages or private paths.
+- Store exposes only open/settings; its raw connection and domain transaction methods remain private. B05's Journal/JournalClient wrapper below adds queued host-side methods, not a model-facing adapter. The SQL test bypass is trusted synthetic setup. B06 adds XDG/task-controller isolation. No permission or runtime readiness follows from a successful open.
+
+Structured private content in contract/evidence/artifact metadata must follow the task's sensitivity/encryption/retention policy; secret payloads never enter plaintext metadata. In particular, never serialize an entire form-containing Checkpoint into metadata_json; future persistence must split safe metadata from authenticated encrypted content and fail closed without keys.
+
+#### B05 writer and transaction boundary
+
+The compiled [worker](../crates/aero-agent/src/store/worker.rs), [private failure/lifecycle tests](../crates/aero-agent/src/store/worker_tests.rs) and journal integration tests own this contract. Root/agent manifests add Tokio 1.54.1 with only sync enabled (oneshot replies, no runtime/network/macros), plus existing serde/serde_json workspace edges. All core/CLI sources are preserved. The unshipped initial schema adds directional token spent/reserved and active-ms reserved counters, with aggregate consistency checks. Old B04-shaped version-1 development databases are intentionally refused by exact schema identity; there is no implicit reset or pretend upgrade migration.
+
+- Journal::start opens the private store and classifies pre-existing prepared intents before exposing any client. A single blocking worker then exclusively owns the connection. Capacity is explicitly 1–256; nonblocking try_send under one short shared sender lock rejects QueueFull without acceptance. Reply::recv uses a Tokio oneshot; blocking_recv is for synchronous callers. No mutex is held across await. Only trusted typed operations are exposed, never arbitrary closures or SQL.
+- Journal::close and Drop stop admission across all client clones, drain accepted work and join after dropping the sender/lock. Start/close/drop are synchronous host operations and must run on a blocking host thread, not an async executor. There is no hard kernel/filesystem cancellation deadline. Panic disconnects replies and closes the store; receiver loss never means a request was cancelled. A lost acknowledgement must be reconciled through stored state, never treated as permission to repeat dispatch.
+- create_task validates N01, requires revision 1 and inserts task+contract atomically. revise_contract requires exactly latest+1, preserves cumulative usage, refuses ceilings below consumption/reservations and invalidates old grants/approvals. create_run requires the latest revision, preserves task usage, and retires older running/awaiting/paused runs as cancelled. Historical records remain readable. These are trusted storage primitives, not N02 human-only issuance, caller-role authentication, readiness or start authorization.
+- prepare_action checks context/current run/revision, refuses task-wide unresolved effects/reservations, and atomically reserves one attempt, the never-reused run cursor, separate input/output tokens and active milliseconds before recording the Decision and step-bound reservation. All counters use checked i64-range arithmetic; an over-budget/failed transaction does not consume a slot. Action proposals are not capabilities. N03 still owns monetary pricing/purchases/provider-specific accounting; no money-budget enforcement is claimed here.
+- commit_step requires an exact prepared task/run/revision/step and matching reservation, records dispatch and verification separately, and atomically settles known usage, stores typed evidence/artifact descriptors, writes metadata-only checkpoint and status. Actual consumption above reservation fails without refund/clear; unknown usage, uncertain dispatch or dispatched-but-unverified outcome remains reserved/needs_review. The already-reserved cursor never advances again. Duplicate/stale commits cannot settle twice. Neither Complete nor Passed can write task completed; verified outcomes currently leave the run/task paused.
+- On startup, prepared orphans become uncertain/needs_review while retaining reservations and cursor. A normal late commit cannot reconcile an uncertain record. load_resume is a read-only bounded metadata view and refuses a live prepared action, so it cannot race dispatch by reclassifying it. Any unresolved task history/reservation blocks new prepare/run/revision/deletion. A future independently justified reconciliation API is separate; no automatic replay exists.
+- load_audit uses an exclusive step cursor and 1–100 entry pages with exact has_more; it executes no external effects. Loaded JSON is bounded, typed, version/shape/semantic/context checked, never defaulted empty on failure. delete_task cascades SQL-owned records only; it is not secure erasure, profile/artifact deletion or N16 retention.
+- Requests/results carry no aggregate raw Debug. The caller must provide already-redacted Decision data and explicit host-side Persistence::Redacted; RequiresEncryption and Sensitive contracts fail closed because no encrypted writer exists. This classification is not proof of redaction and must not come from model JSON. Contracts/opaque IDs are also trusted privacy inputs, not places for credentials. Evidence/artifact descriptors contain only scoped IDs, SHA-256-shaped digests and artifact byte counts; they are caller reports, not physical file creation, source truth or independent verification. CheckpointMetadata is a distinct no-form/no-URL type, not the full B03 Checkpoint; nonce/ciphertext/key fields remain NULL.
+
+The B05 test surface includes the named step_and_checkpoint_are_atomic integration test plus private SQL-trigger injection after prepare/commit writes, lost replies, bounded queue admission, async wakeup, close races/panic/drop, repeated recovery, stale runs/revisions, directional budget boundaries, cross-owner receipts, corruption/privacy and task-specific SQL deletion. Real crash/server effects, N02 roles, N03 money, N04/N05 independent criteria and encrypted browser restoration remain separate gates.
+
+#### B06 private state and controller leases
+
+The compiled [config module](../crates/aero-agent/src/config.rs) resolves XDG_STATE_HOME (empty means unset), otherwise HOME/.local/state, then the dedicated `aerobrowser` directory. Resolution is pure; explicit relative/dot-parent paths fail closed rather than falling back. HOME is unnecessary when an explicit valid state home exists. No global /tmp or XDG_RUNTIME_DIR fallback is used; profiles/staging live under private state and remain until future validated retention cleanup.
+
+PrivateState opens owned 0700 directories with the shared B04 no-follow/ancestry checks, creating missing state ancestors safely without chmodding existing objects. Its journal directory is separate from tasks. TaskLease opens an owned single-link 0600 controller.lock and takes a nonblocking exclusive flock, scoped to one task within that state root; different tasks can hold independent leases. Lock files are never unlinked on release.
+
+TaskId, RunId and RuntimeEpoch are opaque bounded nonblank UTF-8 strings (at most 256 bytes, no NUL), not host path components. Domain-separated SHA-256 keys preserve exact bytes without case folding, trimming or path normalization; fixed-length keys avoid traversal and filename-length failures. Hashing assumes collision resistance and is neither encryption nor protection against guessing low-entropy IDs. The agent adds only an edge to the already locked workspace sha2 crate.
+
+Each task owns runs/<run-key>/runtimes/<epoch-key>/{profile,staging}; a runtime epoch directory is exclusively created and never reused, including after partial creation failure. RuntimeDirs retains the controller owner through Arc, so dropping TaskLease cannot release the task lock while a derived runtime handle exists. Keep the handle, not merely copied paths, until all runtime consumers stop. Creation/drop do not delete prior data or reset journal counters; N16 owns task-wide cleanup.
+
+These are cooperative host-process filesystem/lifetime primitives, not N02 task ownership authorization, a running browser, an input dispatcher, or N08's acknowledged takeover. Integration acquires the application Journal before task leases and runtime directories; failures drop acquired guards, never delete locks to force progress. Callers must stop/join runtime consumers before releasing handles. Journal/task locks are independent. Local Linux filesystem semantics are a deployment requirement, not a filesystem-locality detector; malicious same-UID/root access and network/Windows-mounted filesystem semantics are not covered. Tests exercise required private_state_and_task_lock, real cross-process conflicts and release, distinct task/run/epoch paths, link/permission refusal, explicit environment resolution and preservation of B05 history across runtime generations.
 
 Step protocol:
 
@@ -934,20 +804,28 @@ Keep Chromium's own renderer sandbox working inside Bubblewrap. If kernel/AppArm
 
 ### 7.10 TaskContract, criteria, data-flow and outcome contracts
 
-Implement authoritative Rust models in `crates/aero-core/src/task.rs`, `capability.rs`, `verification.rs`, `evidence.rs`, and `artifact.rs`, exporting from `crates/aero-core/src/lib.rs`. JSON strictness/versioning/limits follow the same rules as actions. Use this complete illustrative TaskContract fixture as `evals/cases/supplier-research.json`'s contract payload; fixture origins are explicitly rebound by the trusted evaluation harness, never by the model:
+The compiled [task module](../crates/aero-core/src/task.rs) owns N01's strict TaskContract/Budget/ProcessingMode/Criterion/OutputRequirement models, exported by core `lib.rs`; [integration tests](../crates/aero-core/tests/task_contract.rs) own the executable fixtures. `capability.rs`, `verification.rs`, `evidence.rs`, and `artifact.rs` remain their later packages, not N01 implementations. The unshipped initial version-1 fixture below is expanded to include specification §4's title/routes/accounts/source labels/export references/dependencies/stops/questions; `budget_currency` replaces the ambiguous illustrative purchase_currency and names the unit for both monetary caps. No stored-version migration or permissive legacy default is introduced. A test reads this exact JSON block and compares it to the compiled fixture. It is the future `evals/cases/supplier-research.json` contract payload, not an evaluation runner; origins are rebound only by its future trusted harness:
 
 ```json
 {
   "schema_version": 1,
   "task_id": "supplier-research-fixture",
   "revision": 1,
+  "title": "Compare approved suppliers",
   "objective": "Compare the two approved fixture suppliers and identify unknown lead times.",
   "profile_ref": "ephemeral-public-research",
+  "account_refs": [],
   "allowed_origins": ["https://supplier-a.test", "https://supplier-b.test"],
+  "allowed_routes": [
+    {"origin": "https://supplier-a.test", "path_prefix": "/"},
+    {"origin": "https://supplier-b.test", "path_prefix": "/"}
+  ],
   "allowed_effects": ["navigate", "extract", "stage_artifact"],
   "forbidden_effects": ["account_create", "submit", "purchase", "upload"],
   "processing_mode": "local_only",
   "processor_grants": [],
+  "source_classifications": [],
+  "export_grants": [],
   "screenshot_transfer_allowed": false,
   "budgets": {
     "max_action_attempts": 30,
@@ -955,7 +833,7 @@ Implement authoritative Rust models in `crates/aero-core/src/task.rs`, `capabili
     "max_input_tokens": 20000,
     "max_output_tokens": 4000,
     "max_purchase_minor_units": 0,
-    "purchase_currency": "USD",
+    "budget_currency": "USD",
     "max_inference_minor_units": null
   },
   "criteria": [
@@ -970,48 +848,49 @@ Implement authoritative Rust models in `crates/aero-core/src/task.rs`, `capabili
     {"name": "supplier-comparison", "format": "csv", "required": true},
     {"name": "supplier-report", "format": "markdown", "required": true}
   ],
+  "dependencies": [],
+  "stop_conditions": ["budget_exhausted", "permission_required", "uncertain_effect"],
+  "unresolved_questions": [],
   "close_behavior": "pause",
   "retention": {"snapshot_days": 7, "artifact_days": 30, "memory_opt_in": false}
 }
 ```
 
-This is a proposed test contract, not a claim of real supplier data, actual model prices, or benchmark results. `null` monetary inference ceiling means unknown/not enforced as money, not unlimited hidden spending; token/request/active-time caps still apply. Expiry/wall-clock limits are distinct from active task time. Unknown fields/kinds/negative/NaN budgets, duplicate criterion/output IDs, no required criterion, unsafe origins, contradictory allowed/forbidden effects, missing required outputs, or missing local provider fail validation before runtime launch. Criteria reference typed verifier IDs; the model cannot supply executable checker code.
+This is synthetic contract data, not real supplier data, model prices or benchmark results. `null` inference money means unknown/not enforced as money, not free inference or unlimited hidden spending; token/attempt/active-time caps still apply. Expiry/wall-clock limits are distinct from active task time. Parsing plus semantic validation rejects unknown/missing/duplicate fields and kinds, positional objects, negative/fractional/overflowing counters, duplicate criterion/output identifiers, absent required criteria/outputs, dangling output references, unsupported origin syntax and contradictory effects. Required criterion/output relationships are checked in both directions; multiple required row-count criteria for the same output must agree, while optional counts remain independent. Criteria map to fixed typed `VerifierKind` values; JSON cannot provide checker code, outcomes or grant authority.
+
+#### N01 wire and validation decisions
+
+- Every declared struct field is required, including explicit null for `max_inference_minor_units`. Reuse map-only `strict_object!` and `strict_tagged_object!` plus B03 nominal TaskId/RunId; no duplicate durable ID types. Required schema_version is integer 1 at decode and revalidated for programmatic values. Contract contents can be private: no raw aggregate Debug; static semantic errors do not echo input, but raw serde errors/serialization still require privacy handling.
+- Counters/revision use u64 bounded by `checkpoint::MAX_COUNTER` (i64::MAX). Revision, max_action_attempts and max_active_ms are positive; explicit zero token/money caps permit no corresponding expenditure. Combined input/output token limits fit the same counter range. No float money or implicit purchase allowance: the trusted creator supplies zero by default explicitly. `budget_currency` is three uppercase ASCII letters shared by both monetary ceilings; this is syntax, not currency support, prices, minor-unit scale, FX conversion or budget reservation. N03 owns enforcement/unknown pricing and cumulative state.
+- Lists have at most 64 entries each, including columns, questions, routes, grants and dependencies. Title/references/column names/IDs are at most 256 UTF-8 bytes; objectives/question prompts at most 8,192 bytes; origin/route strings at most 2,048 bytes. Text cannot be blank or contain NUL; opaque reference bytes are not trimmed or normalized. Criterion/output/question tokens allow ASCII alphanumeric, hyphen and underscore, never host paths. Snapshot/artifact retention is 0–365 days; zero means no retention requested, not proof of deletion. These are explicit initial contract bounds, not unbounded allocation protection before parsing; a future ingress adapter must cap original response bytes.
+- Criterion variants are artifact_schema {id, required, artifact, columns}, row_count {id, required, artifact, expected}, and evidence_coverage {id, required, artifact, required_fraction}. `artifact` means an output requirement's name, not an issued ArtifactId. Schema/count require structured output (csv/json/parquet, not markdown); support for a format is not implemented merely by naming it. Required coverage is a private finite `(0,1]` numeric newtype, enforced during decode and construction. N04/N05/N17/N18 still own actual files, checks, evidence truth and completion; no subjective checker or result setter is exposed here.
+- Origins use a conservative canonical ASCII HTTP(S) subset layered over the unchanged B02 URL guard: lowercase schemes/hosts, canonical IPv4/bracketed IPv6 spelling (IPv4-mapped IPv6 is explicitly unsupported in either spelling to avoid Rust/browser serialization mismatch), no trailing dot, credentials, wildcard, path/query/fragment, zero/default/leading-zero port. Ports are bounded u16; Unicode hostnames require prior reviewed ASCII conversion. Loopback/private hosts are not rejected merely by syntax: this is not DNS/SSRF/network authorization. Exact serialized bytes are retained; later policy parses/resolves effective URLs.
+- Routes are explicit `{origin, path_prefix}` records whose origin appears in allowed_origins. Empty routes permit no routes; `"/"` explicitly requests whole-origin path scope. Prefix matching by the future policy is segment-bounded: `/account` includes itself and `/account/...`, never `/accounting`. Prefix syntax excludes percent escapes, query/fragment, backslash, whitespace/control, repeated slash and dot segments; N06 must handle normalized effective URLs and fail unsupported forms. N01 only validates route syntax/reference consistency, not a live matcher or permission.
+- `source_classifications` contains at most one {origin, classification} per allowed origin with public/private/sensitive; absent classification defaults to private at the trusted gateway, never public. These are proposed source-policy records, not page/model-issued declassification. `account_refs`, `profile_ref`, `processor_grants` and `export_grants` are bounded opaque references, not credentials or inline grants; trusted issuance/ownership/task/revision/recipient/purpose/category/expiry/revocation lookup belongs to N02/N06/N13/N14.
+- Local-only forbids remote processor references and screenshot transfers; it can represent a requested local export with a reference. The future export gateway must prove the recipient is local and specifically granted, never treat that reference as remote permission. Approved-cloud requires named processor references; screenshot transfer and sensitive memory opt-in require explicit exception references, whose presence is only structural. Sensitive mode still requires local processing for start checks even when exceptions are proposed; references do not waive it. `screenshot_transfer_allowed` is not capture permission: sensitive screenshot capture remains separately denied unless the future permission owner validates an exception.
+- Dependencies use nominal TaskId, reject self-links/duplicates but do not prove existence, completion or absence of cross-task cycles. Questions have unique IDs/nonblank prompts; recording an empty list is not proof a trusted user resolved an earlier question. All three safety stops (budget_exhausted, permission_required, uncertain_effect) must be explicit and unique; the contract cannot waive runtime enforcement by omitting them.
+- `validate()` checks only structure/internal consistency. `validate_for_start(&StartPrerequisites)` additionally requires separately trusted local capability for local_only/sensitive, background-service availability for background intent, and no unresolved questions. StartPrerequisites is not deserializable and has no default. Neither check proves readiness, authorization, actual configured cloud/local provider, supported output formats, prices or dependency completion. Background intent still needs N09's explicit trusted per-task grant/isolation/control checks; N02 owns immutable accepted revisions. No runtime/provider/database/keyring or file export is performed.
+
+#### N02 accepted intent and run-record access
+
+The compiled [task access module](../crates/aero-agent/src/tasks.rs) and [task integration tests](../crates/aero-agent/tests/tasks.rs) own the host-issued caller boundary. TaskAuthority::new takes the privileged Journal handle at trusted application bootstrap; only the host factory can mint an owner client or a read-only model client scoped to one TaskId. An adapter receives its client, never the factory, Journal, raw storage client or an owner client. Private fields and no Serialize/Deserialize prevent wire-selected roles or external construction; client clones retain exactly their original scope and journal queue. This is a local capability boundary, not authentication of a remote peer, a Rust sandbox or hostile same-UID isolation. N08 still owns adapter authentication/transport/control-plane integration.
+
+- TaskClient create_task/revise_contract/start_run require owner access before queue admission. Model clients can only load their host-assigned task's bounded resume/audit data; the worker additionally compares persisted run/task/revision, so replacing the task field in a foreign run context cannot redirect reads. Task-write methods on raw JournalClient are crate-private; the factory is deliberately privileged, not model-callable.
+- Create/revise preserve N01 semantic checks and B05 exact-next immutable revisions, task-wide budgets/history and unresolved-effect barriers. Existing grants/approvals are invalidated within the revision transaction. This does not implement trusted effect-grant issuance or quota/revocation lifecycle enforcement (N06).
+- start_run validates the stored revision with N01 validate_for_start and separately supplied host StartPrerequisites inside the writer transaction, before modifying earlier runs or inserting a row. Missing local capability, unresolved questions or unavailable requested background service fail without creating a run. These booleans are trusted host observations, not provider probes, permissions, completed dependency checks or runtime launch.
+- Accepted contracts remain draft; new run records and their tasks begin paused. Merely storing a contract/run must not claim executable readiness or an active browser. Future trusted controller/policy code owns actual activation/dispatch. Provider/UI reconnection is a new client to the same durable identity, not implicit task creation. Superseded run handles and stale revisions retain readable history but cannot prepare new work through the journal.
+- Reads are task-scoped data, not provider-safe payloads. N13 must authorize/redact transfers; no model-facing status/completion/grant setter or raw queue getter exists. ResumeState reports current_status separately from historical checkpoint status; needs_review=false never means a cancelled run may execute. Client lifetime is bounded by the Journal queue: closing it invalidates further admission. Scope is journal plus stable TaskId, not a user/revision/run or revocable login. Deleting and recreating that ID during the same journal lifetime would reuse the read scope; host lifecycle integration must not reuse delegated IDs for unrelated work or treat the factory's presence as authentication.
+- Existing journal integration fixtures now explicitly wrap the real TaskAuthority owner path for task mutations; no fake authorization result or production grant issuer is introduced. Private worker tests supply synthetic StartPrerequisites explicitly. Schema, B06 config, core/CLI and the dependency graph are unchanged.
+
+#### N04 synthetic verification boundary
+
+The compiled [core verification contracts](../crates/aero-core/src/verification.rs), [registry](../crates/aero-agent/src/verification/registry.rs) and [fixture tests](../crates/aero-agent/tests/verification.rs) implement fixed comparisons over a host-installed readback source. Queries contain identity, never expected values; navigation checks lifecycle/effective URL, field checks target/document and state, secret checks use a boolean, artifact schema preserves column order, row count is exact, and evidence-reference checks presence only. Failures, unsupported checks, stale/mismatched identity and malformed observations do not become passes. This is an in-process host convention: Rust `&self` is not a sandbox and the source must establish real ownership, freshness, secrecy and independent readback. No real source or task-completion transition exists. Expected condition and criterion ID must come from the trusted host, not the planner.
+
+`CriterionResult` is a strict, versioned data report with static reasons, not an unforgeable verifier capability. Structurally valid forged Passed/Matched reports and trusted raw `JournalClient::commit_step` reports cannot establish verifier provenance. N05 must use a host-owned verified result flow bound to the accepted persisted contract/revision, criterion, output-name-to-issued-artifact resolution and actual source records; it must not simply decode reports, count evidence IDs or trust a planner/host-supplied status. N17/N18/E05 must implement and test real readbacks, evidence relevance/coverage and artifact checks. `Postcondition` has no standalone version envelope; a future untrusted ingress must enforce an original-byte limit and explicit version before decoding. References/URLs may be private even when structurally valid.
 
 A criterion result carries task/run/contract revision, criterion ID, `status`, `method`, evidence/artifact references, check timestamp and reason. Evidence/artifacts include origin/source capture time, sensitivity, retention and limitations; hashes identify captured bytes rather than prove website truth. Freshness belongs to the record; revalidation is explicit. `Complete` is evaluated by `completion.rs`, not forwarded to `Store::mark_status(completed)` by planner code.
 
-Complete minimal completion predicate for `crates/aero-core/src/verification.rs` (schema/evidence/cross-record validation is the trusted caller's responsibility and gets its own tests):
-
-```rust
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum CheckStatus { NotChecked, Passed, Failed, Inconclusive }
-
-pub fn completion_gate(
-    required_checks: &[CheckStatus],
-    required_artifacts_verified: bool,
-    unresolved_effect: bool,
-) -> bool {
-    !required_checks.is_empty()
-        && required_checks.iter().all(|s| *s == CheckStatus::Passed)
-        && required_artifacts_verified
-        && !unresolved_effect
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn completion_requires_checks_artifacts_and_resolved_effects() {
-        assert!(!completion_gate(&[], true, false));
-        for status in [CheckStatus::NotChecked, CheckStatus::Failed, CheckStatus::Inconclusive] {
-            assert!(!completion_gate(&[CheckStatus::Passed, status], true, false));
-        }
-        assert!(!completion_gate(&[CheckStatus::Passed], false, false));
-        assert!(!completion_gate(&[CheckStatus::Passed], true, true));
-        assert!(completion_gate(&[CheckStatus::Passed], true, false));
-    }
-}
-```
+The compiled [pure completion predicate and its test](../crates/aero-core/src/verification.rs) require a nonempty set of passed checks, verified required artifacts, and no unresolved effect. It accepts caller-provided values; trusted provenance, ownership, freshness, task-wide effect revalidation and the atomic state transition remain unimplemented. See the [blocked N05 checkpoint](handoff.md#current-n05-checkpoint).
 
 A subjective criterion's permitted user attestation is converted to Passed only by a trusted verifier recording `method=user_confirmed`, user attribution and evidence of the exact decision. A model's own report is never converted to Passed. Preserve that distinction in UI/metrics. Add serialization derives and the richer CriterionResult DTO around this predicate without changing its invariant.
 
@@ -1065,8 +944,8 @@ Install Rust using the official rustup method only after approval; choose/pin th
 | Task | Exact files and implementation | Red/green command; required assertions | Approved commit message |
 |---|---|---|---|
 | B01 | `crates/aero-core/src/{lib.rs,ids.rs,types.rs}`, core `Cargo.toml` and `Cargo.lock`. Add distinct `TargetId`, `FrameId`, `CdpSessionId`, `RuntimeEpoch`, `DocumentEpoch`, `ObservationId`; geometry §7.3; separate `FrameLocalRect`, `RootViewportPoint`, `ScreenshotPixelPoint`. IDs serialize as strings but cannot be swapped in Rust APIs. Supply epoch types here; the actual epoch-bound element handle map belongs with D01 observation construction and D02 freshness enforcement, not this pure-primitives batch. | `cargo test -p aero-core center_uses_visible_intersection`; `cargo test -p aero-core ids_are_distinct`; `cargo test -p aero-core --doc`. Test exact string round trips, NaN/zero/offscreen rejection, finite/strict-interior clipping, validated coordinate constructors and compile-fail cross-type checks. Full core and workspace gates must pass. | `feat(core): define scoped IDs and CSS geometry` |
-| B02 | `crates/aero-core/src/actions.rs`, `crates/aero-core/src/lib.rs`. Copy §7.1, simplify JSON fixtures to one-line raw strings, add strict `validate()` with all listed limits and finite number checks. Generate schema from the same type only when planner/MCP need it. | `cargo test -p aero-core decision_`; tests `decision_is_strict_and_round_trips`, `decision_rejects_limits`, `decision_rejects_unknown_action`. | `feat(core): add strict versioned action contracts` |
-| B03 | `crates/aero-core/src/form.rs`, `crates/aero-core/src/checkpoint.rs`, `crates/aero-core/src/events.rs`, `crates/aero-core/src/lib.rs`. Copy §7.2 and add task/run/contract references to versioned checkpoint/events, transient epoch IDs, artifact/evidence references and public status/usage. Authoritative TaskContract remains N01. | `cargo test -p aero-core form_json_preserves_empty_and_false`; `cargo test -p aero-core checkpoint_version`; reject wrong task/revision/future versions and invalid counters. | `feat(core): define task-linked recovery and event models` |
+| B02 | `crates/aero-core/src/actions.rs`, `crates/aero-core/src/lib.rs`. Implement §7.1's mandatory schema_version=1 with rejection of missing/unsupported versions, existing typed ObservationId, strict one-action serde contracts and pure `validate()` with all listed limits and finite number checks. The compiled module owns the definitions/tests. Generate schema from the same type only when planner/MCP need it. | `cargo test -p aero-core decision_ -- --nocapture`; tests `decision_is_strict_and_round_trips`, `decision_rejects_limits`, `decision_rejects_unknown_action`, plus version/shape/boundary/sibling-variant cases listed in §7.1. Full core/workspace/build/fmt/Clippy and documentation gates. | `feat(core): add strict versioned action contracts` |
+| B03 | `crates/aero-core/src/form.rs`, `crates/aero-core/src/checkpoint.rs`, `crates/aero-core/src/events.rs`, `crates/aero-core/src/lib.rs`, scoped durable-reference additions in `ids.rs` and private `wire.rs`. Implement §7.2's strict compiled form/checkpoint/event contracts, mandatory versions/capture completeness, expected-context validation, transient epochs, evidence/artifact references and public status/usage. Authoritative TaskContract remains N01; no persistence/encryption/capture. | `cargo test -p aero-core form_json_preserves_empty_and_false -- --nocapture`; `cargo test -p aero-core checkpoint_version -- --nocapture`; full `form_`, `checkpoint_`, `public_event_` and ID suites, wrong task/run/revision/future versions, invalid counters, bounds, duplicate/null/array cases and no-raw-Debug compile-fail proof. Shared core/workspace/build/fmt/Clippy and docs gates. | `feat(core): define task-linked recovery and event models` |
 | B04 | `crates/aero-agent/src/store/migrations/001_initial.sql`, `crates/aero-agent/src/store/mod.rs`, `crates/aero-agent/src/lib.rs`, `crates/aero-agent/tests/journal.rs`. Use revised §7.5 TaskContract/run/evidence/artifact schema, private paths and pragmas, known-version migrations only. Do not implement the superseded session-only schema. | `cargo test -p aero-agent --test journal schema_and_foreign_keys`; user_version=1, task→run foreign keys, immutable revisions, duplicate IDs, corruption/future schema errors, reopen persistence. | `feat(store): add task-owned transactional journal` |
 | B05 | `crates/aero-agent/src/store/worker.rs`, `crates/aero-agent/src/store/mod.rs`, `crates/aero-agent/tests/journal.rs`. Bounded writer thread methods create_task/revise_contract/create_run/prepare_action/commit_step/load_resume/load_audit/delete_task. Checked task-wide budget reservation and never-reused run-step allocation precede dispatch; commit verification/artifact/checkpoint metadata atomically. | `cargo test -p aero-agent --test journal step_and_checkpoint_are_atomic`; inject failure, verify all-old/all-new state and prepared orphan→needs_review; no run/task cross-owner record accepted. | `feat(store): journal task budgets and verified effects atomically` |
 | B06 | `crates/aero-agent/src/config.rs`, `crates/aero-agent/tests/journal.rs`. Private XDG task/run staging, no global /tmp profile. One task controller/input owner lock; distinct runtime/profile boundaries. Deletion is N16 task-owned cleanup, not deletion of a run to reset budgets/uncertainty/history. | `cargo test -p aero-agent --test journal private_state_and_task_lock`; 0700/0600 permissions, independent tasks, lock conflict, no symlink/cross-task escape. | `feat(store): isolate task data and controller ownership` |
@@ -1181,7 +1060,7 @@ Files: `crates/aero-core/src/task.rs`, `crates/aero-core/src/lib.rs`, `crates/ae
 1. Add a roundtrip test using the complete §7.10 contract JSON. Assert task ID/revision/criteria/output references survive serialization; unknown fields and duplicate criterion/output IDs fail.
 2. Run `cargo test -p aero-core --test task_contract contract_is_strict_and_roundtrips -- --exact`; expected red: model/validator does not yet satisfy the asserted contract.
 3. Add typed TaskContract/Budget/ProcessingMode/Criterion/OutputRequirement enums/structs with serde strictness and bounds. Export the module; then implement one validator branch per failing invalid fixture. No executable checker code from JSON.
-4. Re-run the exact test, then `cargo test -p aero-core`; expected every added case runs/passes. Add separate `task_and_run_ids_are_distinct` to prevent treating browser/session ID as TaskID.
+4. Re-run the exact test, then `cargo test -p aero-core`; expected every added case runs/passes. Add separate `task_and_run_ids_are_distinct` to prevent treating browser/session ID as TaskID. Reuse B03's nominal TaskId/RunId from `ids.rs`; that existing primitive proof is not the TaskContract acceptance test and is not permission to define duplicate ID types.
 
 Approved commit: `feat(tasks): define strict durable task contracts`.
 
@@ -1222,10 +1101,10 @@ Approved commit: `feat(verification): separate effects from independent checks`.
 
 Files: `crates/aero-core/src/verification.rs`, `crates/aero-agent/src/verification/completion.rs`, `crates/aero-agent/src/orchestrator.rs`, `crates/aero-agent/tests/verification.rs`.
 
-1. Copy §7.10's complete predicate and failing test first, initially with a minimal false implementation so expected successful case is red. Run `cargo test -p aero-core completion_requires_checks_artifacts_and_resolved_effects` and implement the shown predicate to green.
-2. Add `model_complete_cannot_bypass_criteria`: submit a model Complete proposal with missing artifact, inconclusive criterion and unresolved intent; no completed transition may occur.
-3. Run `cargo test -p aero-agent --test verification model_complete_cannot_bypass_criteria -- --exact` to red; implement validated task/revision-owned criterion lookup, required artifact readback and unresolved-effect check.
-4. Add tests for explicit allowed user attestation with attribution, disallowed self-attestation, stale evidence/revision, and all-required-pass success. Run the same suite to green. UI/CLI/events consume this result, not a separate success boolean.
+1. Implemented locally: the [pure completion predicate](../crates/aero-core/src/verification.rs) and named test observed red then green. Predicate inputs are not trusted evidence.
+2. The named `model_complete_cannot_bypass_criteria` currently exercises only journal proposal noncompletion with a missing artifact, no criterion records and a prepared action; it does not exercise the absent orchestrator, inconclusive criterion or an actual gate. Expand after prerequisites.
+3. After [DEC-009](bug-fix-tracking.md#dec-009--n05-prerequisite-scope), implement and run validated task/revision-owned criterion lookup, trusted required artifact/evidence readback and task-wide unresolved-effect check; atomically revalidate them with completion status.
+4. Add tests for explicit allowed user attestation with attribution, disallowed self-attestation, stale evidence/revision, races and all-required-pass success. Run the suite to green. UI/CLI/events consume this result, not a separate success boolean.
 
 Approved commit: `feat(verification): enforce evidence-backed task completion`.
 
@@ -1347,6 +1226,13 @@ Files: `crates/aero-agent/src/tasks.rs`, `crates/aero-agent/src/evidence.rs`, `c
 2. Run `cargo test -p aero-agent --test tasks delete_task_purges_owned_derived_data -- --exact` to red.
 3. Implement owner-validated directory-relative cleanup and idempotent tombstone/retry where DB+filesystem cannot share a transaction. Respect retention holds/explicit exports; disclose external-copy limits. No raw secret in deletion log.
 4. Re-run green; include symlink/cross-task escape/retention-expiry cases, and ensure reports do not promise revocation of already-sent external data.
+
+Current design constraints (not yet implemented or approved for real data):
+
+- The current preflight proves cooperative lock exclusion only; `JournalClient::delete_task` is SQL-only and does not gate live filesystem writers. Preserve the permanent task shell and lock inode; replacing either can split the lock domain. Nested entries are not validated by preflight.
+- Proposed first durable slice: an explicitly selected new v2 journal on disposable fixtures, leaving v1 schema and opener unchanged; no automatic upgrade or real deletion. A separate permanent tombstone survives SQL cascade and prevents ID reuse. Old v1 openers reject v2 journals but old filesystem-only APIs can still bypass journal admission; production requires an enforceable single-version cutover.
+- Proposed trusted retention coordinator first retires/drains gateway and runtime owners, takes the existing task lock nonblockingly, then rechecks trusted known holds and unresolved effects/reservations inside the serialized writer. One transaction records `deleting` and closes every task-scoped admission. Later idempotent steps remove SQL rows and descriptor-relative task-owned files, sync affected directories, verify the allowed remaining shell, and only then commit `complete`. Unknown hold state, unsafe traversal, missing lock, unsupported filesystem semantics, or incomplete cleanup remain blocked/deleting. Never expose this to model-scoped clients.
+- Test crash/lost reply at every transaction and filesystem durability boundary, retry after restart, competing admissions/holds, lock contention across processes, other-task/outside sentinels, symlinks/hardlinks/mount crossings, task-ID non-reuse, and v1/v2 compatibility. Only actual implemented stores count toward acceptance. Tombstone metadata may itself identify a user; lifetime/representation needs an owner privacy decision. Whether holds can be imposed after the irreversible admission-closing point needs a product/legal decision. Real migration, backup/rollback, cutoff deployment and deletion each need explicit approval; local unlink is not secure erasure or revocation of remote/exported copies.
 
 Approved commit: `feat(retention): delete task data and derived local records`.
 

@@ -1,6 +1,6 @@
 # AeroBrowser — bug, fix, blocker, and decision tracker
 
-Updated for the approved B01 commit on 2026-10-22. This remains the authoritative local issue register. Local main is linked to private dave2k77/aero-browser; bootstrap and README were separately approved and committed. B01 primitives are committed as 54e0a9573d8eb90746243f0f24056b05a3022988 after the user said “commit and push”; see the [current evidence record](handoff.md#current-b01-checkpoint). Hosted issue migration, later batch commits, public release and private-evidence publication are not approved. Verify actual remote delivery separately.
+Updated for the N17/N18 blocked checkpoint; see the [current evidence record](handoff.md#current-n17n18-blocked-checkpoint). This remains the authoritative local issue register. Local main is linked to private dave2k77/aero-browser; bootstrap and README were separately approved and committed. B01 primitives remain committed as 54e0a9573d8eb90746243f0f24056b05a3022988 after explicit commit/push approval; B02/B03, audit repairs, N01–N04 and B04–B06 remain uncommitted. Hosted issue migration, later commits, public release and private-evidence publication are not approved. Verify actual remote delivery separately.
 
 Read [the specification](specification.md), [implementation plan](implementation-plan.md), [handoff](handoff.md), and [contribution rules](../CONTRIBUTING.md). Bootstrap code and prerequisite diagnostics now exist. Deliberate TDD red states, missing setup and untested platform assumptions are not disguised as production defects or completed fixes.
 
@@ -53,11 +53,60 @@ For each code fix:
 
 For an environment issue, close only after actual tools/backend checks pass in the intended environment and the handoff records the new facts. For a decision, record the owner's exact accepted scope and what remains unapproved. Decision entries are not authorization until that response exists.
 
-## 4. Live register — initial state
+## 4. Live register
 
 ### Application defects
 
-No BUG records yet. The B01 identifier/geometry/coordinate primitives, existing core import contract and eight CLI diagnostic tests pass: 25 behavior tests and five compile-fail doctests across the workspace. B01 TDD exposed and corrected floating-point midpoint boundary rounding before review; that deliberate red state is evidence in the handoff, not a fabricated shipped-product BUG. Browser/task execution and epoch-bound handle invalidation are not implemented. This is not a claim that the future product is bug-free. ENV-002/ENV-004 remain unverified native/runtime gates; pure-core B01 did not exercise or close them.
+N02's current workspace passes 143 behavior tests/eleven compile-fail doctests. Required model-revision denial, persisted start prerequisites and truthful draft/paused state were observed red/green. Nine task integration tests, three capability compile-fail proofs, design/source review and final gates pass; no actionable N02 finding remains. Capability scope/lifetime and authentication/egress limits are explicit in the handoff. Existing BUG/ENV records are unchanged; older checkpoint counts below are historical, not current totals.
+
+B06's current workspace passes 134 behavior tests/eight compile-fail doctests. Its required duplicate-owner assertion was observed red/green; eight private-state/lease integration tests and design/source review are complete with no remaining in-scope defect identified. Existing BUG/ENV states are unchanged. Cooperative filesystem ownership is not actual dispatch/takeover authority or native qualification. Counts and next-action text in the older paragraphs below are historical.
+
+B05's current workspace passes 126 behavior tests/eight compile-fail doctests. Atomicity, stale-run/live-recovery, reservation-owner/checkpoint-cursor and two final-review corruption defects were reproduced and fixed within the unshipped batch; exact red/green evidence is in the current handoff. The final review's action-state/outcome and evidence/artifact payload findings are covered by parent-run repository regressions. No outstanding B05 defect was identified after integration; this is not N02 authority, money-budget, encryption or real crash qualification. Earlier checkpoint counts below are historical; existing BUG/ENV records are not closed by this new batch.
+
+B04 now adds seventeen schema/private-open tests; the final workspace has 104 behavior tests and eight compile-fail doctests. Required schema-version and schema-prefix/ancestor hardening failures were observed red/green during this unshipped batch, not filed as fabricated shipped defects. Source review identified no remaining in-scope blocker; parent-run tests include failed-open lock release and auxiliary-file byte preservation. B04 establishes initial SQL/storage structure only: B05 transactions/queue, trusted authority, encryption and recovery remain future work. Existing BUG-001–004 and ENV statuses below are unchanged; N01 counts in the following historical paragraph describe its own checkpoint, not the current total.
+
+The pre-N01 audit reproduced/fixed BUG-001 and three additional CLI issues below; its 70 behavior tests and seven compile-fail doctests remain historical evidence. N01 adds 17 TaskContract integration tests and one compile-fail example for a current 87 behavior tests/eight compile-fail doctests. N01's deliberate red scaffolds and pre-review mandatory-stop/local-export/mapped-IPv6/required-row-count refinements are recorded with parent-observed red/green in the handoff rather than fabricated shipped BUG records. Both final source-review findings are fixed and gates rerun; no remaining N01 pure-contract blocker was identified. Existing audit fixes remain ready for owner review. None of these uncommitted fixes is closed merely on a subagent report. Browser/task execution, persistence/encryption, policy and recovery remain unimplemented. ENV-002/ENV-004 are unchanged unverified runtime/native gates, not closed by pure-core tests.
+
+| ID | Severity / priority | State | Owner | Defect / blocked gate |
+|---|---|---|---|---|
+| BUG-001 | S2 / P0 | ready_for_review | Hermes | Authorized map-only Action fix and two all-variant repository regressions are green; final audit/gates pass. Uncommitted, not closed. |
+| BUG-002 | S2 / P1 | ready_for_review | Hermes | Diagnostic probe descendants outlive their root/timeout; dedicated group cleanup and regression tests pass locally. |
+| BUG-003 | S2 / P1 | ready_for_review | Hermes | Pin helper requires absent python alias on Python-3-only systems; explicit python3/preflight and adapter regressions pass. |
+| BUG-004 | S2 / P2 | ready_for_review | Hermes | Unbounded executable hashing can stall doctor; regular-file/1 GiB/read/deadline limits and regression tests pass. |
+
+#### BUG-001 — B02 action enum accepts positional arrays
+
+- Requirement/package: B02 / §7.1's mandatory object-only action wire shape; complements SPEC-26/SPEC-27's partial typed-wire foundations.
+- Environment/revision: main af88105 plus local uncommitted B02/B03, pinned Rust/Cargo 1.99.1, serde 1.0.229, default features; no browser or provider.
+- Actual reproduction: a scratch Rust harness compiled against the built core and existing test-only serde_json. `action_array_is_rejected` feeds `["click","target-1"]`; `nested_action_array_is_rejected` feeds the same array as `action` in a valid version-1 Decision. Both expect decoding failure but receive Ok; running `/home/davia/.hermes/cache/scratch/aero-b03-sibling-array-probe --nocapture` exits 101, two failed tests. Source/evidence: sibling-array-probe `.rs`/`.log` at that same scratch prefix; artifacts are local and ephemeral, not committed regression coverage.
+- Root cause/siblings: derived internally tagged enum decoding accepts sequences. B03's FieldValue/EventKind had the same issue and now use a shared map-only tagged decoder with observed direct/nested red-to-green. Decision's map-only outer envelope does not protect its inner Action enum.
+- Impact/containment: S2 pure-parser contract discrepancy with no runtime consumer or demonstrated authority bypass. P0 before B02 review/commit: do not treat the green existing suite or successful parameter validation as proof of required shape/authorization. Do not enable a planner/executor on this parser while this mandatory case fails.
+- Actual minimum fix under accepted DEC-008: Action now uses the existing schema-once map-only tagged helper; valid object serialization, optional/null scroll-target semantics, Debug/PartialEq behavior and existing validation remain unchanged. No dependency or runtime behavior added. The earlier B03 preservation baseline is historical; the new user approval explicitly permits this actions.rs correction.
+- Repository regression evidence: `cargo test -p aero-core action_requires_an_object_for_every_variant -- --nocapture` and `cargo test -p aero-core decision_rejects_positional_action_arrays -- --nocapture` each executed one test and failed with exit 101 before the parser change, accepting Click arrays. Both now pass across all 18 declared variants, direct and nested. Existing valid-object roundtrips, optional target, duplicate/null-first fields and bounds remain green; at that fix step full core passed 50 unit tests, one import and seven compile-fail doctests; systematic rejection hardening subsequently raises core unit coverage to 51. Workspace/build/fmt/warning-denied Clippy and core rustdoc gates pass as well.
+- Approval/review: DEC-008 accepted by the user's explicit follow-up; prior unanswered form is historical. Integrating reviewer: Hermes. Existing-code audit/source-review integration is complete and the fix remains ready_for_review, not closed or committed. No staging/push performed; owner review and explicit commit approval remain separate.
+
+#### BUG-002 — Doctor leaves diagnostic probe descendants running
+
+- Scope/severity: A04 diagnostic lifecycle, S2/P1; reproducible process leakage, not a demonstrated browser sandbox escape. User's DEC-008 existing-code audit authorization covers the repair; no C04 runtime implemented.
+- Parent reproduction: `cargo test -p aero-cli --test doctor doctor_probe_cleans_descendants -- --nocapture` executed two tests; both failed (exit 101) after observing live synthetic `sleep` descendants. Fixtures explicitly killed leaked processes before failing, so red-state tests did not leave running fixtures.
+- Root cause: only immediate-child timeout killing, with no owned process group and no cleanup on normal root exit/stdout timeout.
+- Fix: `doctor.rs` starts each trusted diagnostic in its own process group and uses Linux waitid/WNOWAIT to observe exit without reaping the leader. Cleanup signals that still-owned group before the final direct-child wait/reap; consuming the group ID prevents another signal on Drop. Normal/nonzero root exits clean the group before stdout EOF; timeout/error paths use the same guard. Nondefault/auto-reaping SIGCHLD policy is refused before spawn, and an unexpected ECHILD discards numeric signalling authority. This is not hostile process containment or a guarantee against deliberately detached descendants.
+- Review refinement/proof: the first group-cleanup repair still used reaping try_wait, which could release its PID before signalling. Parent's `probe_keeps_leader_unreaped_until_group_cleanup` regression failed exit 101 before WNOWAIT (getpgid returned -1), then passed after the repair. This proves the ownership-order violation, not a forced rare PID-reuse collision. The group-cleanup, no-double-signal and wait-policy tests plus all original doctor tests pass; source finding is resolved by the integrating parent, not closed on a child claim.
+- Dependency adjustment: root/CLI manifests explicitly reuse already-locked libc 0.2.191 for correct platform layouts/constants and waitid/killpg/sigaction bindings rather than hand-code siginfo_t. Offline Cargo changed only the aero-cli→libc edge in Cargo.lock; the package/version/checksum set is unchanged. No package installation, update, network, browser, host-setting, staging/commit/push or account use. The initial no-manifest-change expectation is superseded by this bounded correctness repair.
+
+#### BUG-003 — Browser pin helper requires an undocumented python alias
+
+- Scope/severity: A04 shell adapter, S2/P1; a Python-3-only environment could not use the documented helper.
+- Parent reproduction: new `cargo test -p aero-cli --test browser_pin_helper -- --nocapture` ran three tests, all failed (exit 101). A controlled PATH exposed Python 3 but no `python`; the helper returned 127 instead of parsing a synthetic valid report. Missing-Python preflight and mismatch/failed-Cargo cases also failed at the absent alias.
+- Fix: `scripts/lock-browser.sh` explicitly checks `python3` before running Cargo, exits 2 with an actionable message if absent, and invokes python3 for JSON parsing. Contributor checks use python3 as well; the development guide names the prerequisite. No Python package/install or download added.
+- Proof: all three adapter tests pass for Python-3-only success, fail-before-Cargo without Python 3, mismatching pin rejection and original Cargo-error propagation. Cargo reports are deliberately synthetic shell-adapter fixtures, not claimed browser qualification. No pin change; uncommitted, ready for owner review.
+
+#### BUG-004 — Executable integrity hashing is unbounded
+
+- Scope/severity: A04 diagnostic robustness, S2/P2; an oversized/self-growing or stalled executable read could hang a diagnostic despite its version deadline. Ordinary-browser failure or integrity bypass was not demonstrated.
+- Parent reproduction: `cargo test -p aero-cli --bin aero integrity_rejects_oversized_files_before_hashing -- --nocapture` executed once and failed (exit 101); a sparse 1 GiB+1 fixture was not promptly rejected. The failed filtered test process ended its hash worker; the fixture held no real browser bytes.
+- Fix: regular-file and 1 GiB metadata cap, an actual-byte read cap (including post-metadata growth), deadline checks between chunks and a separate two-second caller wait for the integrity job. Size/type/timeout failure reports browser_lock unavailable, never matched or a sandbox success.
+- Proof: oversized-file rejection, unchanged small-file digest and a deliberately blocked-job timeout test pass. Filesystem work is not joined on timeout: already blocked kernel I/O cannot be canceled by Rust threads, and the one-shot doctor's process exit ends outstanding threads. This bound is not browser-runtime recovery, file authenticity or a hard real-time scheduling guarantee. The hashing repair adds no package/pin change or real browser operation; uncommitted, ready for owner review.
 
 ### Environment blockers
 
@@ -116,6 +165,8 @@ No BUG records yet. The B01 identifier/geometry/coordinate primitives, existing 
 | DEC-005 | P1 | pending | Project owner | Confirm application ID/domain, project/asset/browser rights, browser update/redistribution owner, signing identity and release channel | Packaging/publication claims and release upload |
 | DEC-006 | P1 | pending | Project owner | Supply/review protected holdout and freeze required workload/performance thresholds after baseline | N24 optimization/release acceptance claims |
 | DEC-007 | P2 | pending | Project owner | Decide whether background service, strong egress/intranet backend, Flatpak, or other measured optional features earn scope | Their separate backend/feasibility implementation gates |
+| DEC-008 | P0 | accepted | Project owner | User authorizes BUG-001 repair plus audit/fixes of implemented code before moving on | No N01/new feature, install/account operation, staging/commit/push or publication implied |
+| DEC-009 | P0 | pending | Project owner | N17/N18 authorized; decide trusted attestation and additional prerequisite scope | Full N05 completion gate and transition |
 
 #### DEC-001 — Development setup authorization
 
@@ -146,6 +197,14 @@ Current status: `holdout_not_available`; no baseline model/browser performance o
 #### DEC-007 — Optional scope selection
 
 Default: in-process service, pause-on-close, CSV, sequential execution, SQLite-first bounded history, native package first. Keep daemon/background, Parquet, semantic retrieval, SOM, MCP, workers, metrics, Flatpak, remote workers, and training off until individually justified/approved/tested. A strict egress or continue-on-close request must fail honestly if its required backend is unavailable; it cannot downgrade to a weaker mode. An undecided optional feature does not block the minimal CLI slice.
+
+#### DEC-008 — B02 parser-only scope extension
+
+Accepted: the user now says, “Ok, let's resolve this bug, and let's find any other bugs or issues that needs to be fixed before moving on.” The previous unanswered form remains historical, not an approval. This new response authorizes BUG-001's parser/test correction and a review/reproduction/fix pass over existing implemented contracts, diagnostics and scripts. Preserve valid object wire data and optional/null scroll-target semantics. The lifecycle repair explicitly reuses already-locked libc through a new direct CLI edge for correct platform bindings; no new package/version or download is introduced. This adjustment is documented for owner review rather than hidden behind the initial no-dependency-change expectation. No N01/new feature implementation, install/provider/account operation, staging/commit/push or publication is included. Fixes require concrete reproduction, regression tests, affected gates and updated evidence before owner review.
+
+#### DEC-009 — N05 prerequisite scope
+
+Partially resolved: the owner authorized N17/N18, but those packages now have only partial foundations and are blocked on the missing prerequisites in the [current handoff](handoff.md#current-n17n18-blocked-checkpoint). An explicitly permitted, attributed trusted-user attestation contract remains a separate decision. The current N05 pure predicate and narrow journal test do not establish completion, artifact/evidence truth or attestation. Finalization must close the transaction/freshness race described in the [N05 handoff](handoff.md#current-n05-checkpoint). No reset, migration, staging, commit or push was implied by the prerequisite approval.
 
 ## 5. Initial design hazards already covered by the plan
 
