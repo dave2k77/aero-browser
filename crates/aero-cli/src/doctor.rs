@@ -4,14 +4,84 @@ use std::env;
 use std::fs::{self, File};
 use std::io::{self, Read};
 use std::os::unix::fs::PermissionsExt;
+use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
 const VERSION_TIMEOUT: Duration = Duration::from_secs(2);
 const OUTPUT_LIMIT: u64 = 4096;
+const INTEGRITY_TIMEOUT: Duration = Duration::from_secs(2);
+const MAX_EXECUTABLE_BYTES: u64 = 1 << 30;
+
+struct ProbeProcess {
+    child: Child,
+    group: Option<libc::pid_t>,
+}
+
+impl ProbeProcess {
+    // Internal callers must spawn with process_group(0).
+    fn new(child: Child) -> Self {
+        let group = libc::pid_t::try_from(child.id())
+            .ok()
+            .filter(|pid| *pid > 0);
+        Self { child, group }
+    }
+
+    fn has_exited(&mut self) -> io::Result<bool> {
+        // SAFETY: libc's zero-valid C struct has the target ABI/layout. waitid
+        // writes it for this owned child only; WNOWAIT does not release its PID.
+        let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+        let result = unsafe {
+            libc::waitid(
+                libc::P_PID,
+                self.child.id(),
+                &mut info,
+                libc::WEXITED | libc::WNOHANG | libc::WNOWAIT,
+            )
+        };
+        if result != 0 {
+            let error = io::Error::last_os_error();
+            if error.raw_os_error() == Some(libc::ECHILD) {
+                // Ownership was lost unexpectedly. Fail closed: do not signal
+                // a numeric PID/PGID that another actor may already have reaped.
+                self.group = None;
+            }
+            if error.kind() == io::ErrorKind::Interrupted {
+                return Ok(false);
+            }
+            return Err(error);
+        }
+        Ok(info.si_signo == libc::SIGCHLD)
+    }
+
+    fn stop_group(&mut self) {
+        if let Some(group) = self.group.take() {
+            // SAFETY: positive private process_group(0) leader, kept unreaped by
+            // WNOWAIT until this signal. Taking the ID forbids a post-reap signal.
+            unsafe {
+                libc::killpg(group, libc::SIGKILL);
+            }
+        }
+    }
+
+    fn finish(mut self) -> io::Result<ExitStatus> {
+        self.stop_group();
+        self.child.wait()
+    }
+}
+
+impl Drop for ProbeProcess {
+    fn drop(&mut self) {
+        if self.group.is_some() {
+            self.stop_group();
+            let _ = self.child.kill();
+            let _ = self.child.wait();
+        }
+    }
+}
 
 #[derive(Serialize)]
 pub struct ExecutableCheck {
@@ -134,20 +204,32 @@ fn probe(path: Option<PathBuf>) -> ExecutableCheck {
     }
 }
 
-// Only explicit trusted local executable paths are probed. This is not a browser
-// launcher or a sandbox: the later runtime owns browsing and descendant cleanup.
+// Only trusted local executables are probed. Own/kill this diagnostic's process
+// group and reap its direct child, not a browser runtime or hostile-exec sandbox.
 fn version(path: &Path) -> Result<String, &'static str> {
-    let mut child = Command::new(path)
-        .arg("--version")
-        .env_clear()
-        .env("PATH", "/usr/bin:/bin")
-        .env("LANG", "C")
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .map_err(|_| "version_spawn_failed")?;
-    let stdout = child.stdout.take().ok_or("version_output_unavailable")?;
+    // Refuse inherited auto-reaping/custom handlers before spawning: exclusive
+    // ownership must retain the leader's PID until group cleanup is complete.
+    if !default_child_wait_policy() {
+        return Err("version_wait_policy_unavailable");
+    }
+    let mut process = ProbeProcess::new(
+        Command::new(path)
+            .arg("--version")
+            .process_group(0)
+            .env_clear()
+            .env("PATH", "/usr/bin:/bin")
+            .env("LANG", "C")
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .map_err(|_| "version_spawn_failed")?,
+    );
+    let stdout = process
+        .child
+        .stdout
+        .take()
+        .ok_or("version_output_unavailable")?;
     let (sender, receiver) = mpsc::sync_channel(1);
     thread::spawn(move || {
         let mut output = Vec::new();
@@ -155,22 +237,21 @@ fn version(path: &Path) -> Result<String, &'static str> {
         let _ = sender.send(result.map(|_| output));
     });
     let deadline = Instant::now() + VERSION_TIMEOUT;
-    let status = loop {
-        match child.try_wait() {
-            Ok(Some(status)) => break status,
-            Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(5)),
-            Ok(None) => {
-                let _ = child.kill();
-                let _ = child.wait();
+    loop {
+        match process.has_exited() {
+            Ok(true) => break,
+            Ok(false) if Instant::now() < deadline => thread::sleep(Duration::from_millis(5)),
+            Ok(false) => {
                 return Err("version_timeout");
             }
             Err(_) => {
-                let _ = child.kill();
-                let _ = child.wait();
                 return Err("version_wait_failed");
             }
         }
-    };
+    }
+    // The root may exit while a descendant holds stdout open. Clean the group
+    // before waiting for EOF, including on normal and nonzero root exits.
+    let status = process.finish().map_err(|_| "version_wait_failed")?;
     let output = receiver
         .recv_timeout(deadline.saturating_duration_since(Instant::now()))
         .map_err(|_| "version_output_timeout")?
@@ -187,6 +268,17 @@ fn version(path: &Path) -> Result<String, &'static str> {
         return Err("version_output_invalid");
     }
     Ok(text.to_owned())
+}
+
+fn default_child_wait_policy() -> bool {
+    // SAFETY: query (never change) SIGCHLD with a valid writable libc C struct.
+    let mut action: libc::sigaction = unsafe { std::mem::zeroed() };
+    let result = unsafe { libc::sigaction(libc::SIGCHLD, std::ptr::null(), &mut action) };
+    result == 0 && wait_policy_preserves_children(&action)
+}
+
+fn wait_policy_preserves_children(action: &libc::sigaction) -> bool {
+    action.sa_sigaction == libc::SIG_DFL && action.sa_flags & libc::SA_NOCLDWAIT == 0
 }
 
 fn check_browser_pin(browser: &ExecutableCheck) -> Check {
@@ -239,23 +331,170 @@ fn check_browser_pin(browser: &ExecutableCheck) -> Check {
             status: "mismatch",
             detail: "Executable bytes differ from the recorded development pin.",
         },
-        Err(_) => Check {
+        Err(error) => Check {
             status: "unavailable",
-            detail: "Cannot read the configured browser executable for integrity checking.",
+            detail: match error.kind() {
+                io::ErrorKind::TimedOut => {
+                    "Executable integrity check exceeded its two-second deadline."
+                }
+                io::ErrorKind::InvalidData => {
+                    "Integrity checking requires a regular executable no larger than 1 GiB."
+                }
+                _ => "Cannot read the configured browser executable for integrity checking.",
+            },
         },
     }
 }
 
 fn sha256(path: &Path) -> io::Result<String> {
-    let mut file = File::open(path)?;
+    let path = path.to_owned();
+    integrity_job(INTEGRITY_TIMEOUT, move |deadline| {
+        hash_file(&path, deadline)
+    })
+}
+
+fn integrity_job(
+    timeout: Duration,
+    job: impl FnOnce(Instant) -> io::Result<String> + Send + 'static,
+) -> io::Result<String> {
+    let deadline = Instant::now() + timeout;
+    let (sender, receiver) = mpsc::sync_channel(1);
+    thread::spawn(move || {
+        let _ = sender.send(job(deadline));
+    });
+    // Do not join potentially blocked filesystem I/O. Doctor's process exit ends
+    // outstanding threads; normal reads also check the deadline between chunks.
+    receiver
+        .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+        .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "integrity check did not finish"))?
+}
+
+fn hash_file(path: &Path, deadline: Instant) -> io::Result<String> {
+    let file = File::open(path)?;
+    let metadata = file.metadata()?;
+    if !metadata.is_file() || metadata.len() > MAX_EXECUTABLE_BYTES {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "executable size/type limit",
+        ));
+    }
+    // A file can grow after metadata was read. Bound the actual bytes too.
+    let mut file = file.take(MAX_EXECUTABLE_BYTES + 1);
     let mut hash = Sha256::new();
     let mut buffer = [0_u8; 16384];
+    let mut total = 0;
     loop {
+        if Instant::now() >= deadline {
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "integrity deadline",
+            ));
+        }
         let count = file.read(&mut buffer)?;
         if count == 0 {
             break;
         }
+        total += count as u64;
+        if total > MAX_EXECUTABLE_BYTES {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "executable size limit",
+            ));
+        }
         hash.update(&buffer[..count]);
     }
     Ok(format!("{:x}", hash.finalize()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn probe_rejects_auto_reaping_wait_policies() {
+        // SAFETY: zero-valid C struct; this test never mutates OS signal policy.
+        let mut action: libc::sigaction = unsafe { std::mem::zeroed() };
+        action.sa_sigaction = libc::SIG_DFL;
+        assert!(wait_policy_preserves_children(&action));
+        action.sa_flags = libc::SA_NOCLDWAIT;
+        assert!(!wait_policy_preserves_children(&action));
+        action.sa_flags = 0;
+        action.sa_sigaction = libc::SIG_IGN;
+        assert!(!wait_policy_preserves_children(&action));
+    }
+
+    #[test]
+    fn probe_keeps_leader_unreaped_until_group_cleanup() {
+        let child = Command::new("/bin/sh")
+            .args(["-c", "exit 0"])
+            .process_group(0)
+            .spawn()
+            .unwrap();
+        let mut process = ProbeProcess::new(child);
+        let pid = process.child.id() as libc::pid_t;
+        let deadline = Instant::now() + Duration::from_secs(1);
+        while !process.has_exited().unwrap() {
+            assert!(Instant::now() < deadline);
+            thread::sleep(Duration::from_millis(5));
+        }
+        // SAFETY: query only the synthetic child's positive PID, no signal.
+        let group = unsafe { libc::getpgid(pid) };
+        if group < 0 {
+            // Contain the known red state: the leader is already reaped, so
+            // never send a group signal using that now-unreserved numeric ID.
+            process.group = None;
+        }
+        assert_eq!(group, pid, "leader was reaped before owned-group cleanup");
+        process.stop_group();
+        assert!(
+            process.group.is_none(),
+            "cleanup must not signal this group twice"
+        );
+        assert!(process.finish().unwrap().success());
+    }
+
+    #[test]
+    fn integrity_deadline_does_not_join_blocked_work() {
+        let (release, blocked) = mpsc::channel();
+        let (finished, done) = mpsc::channel();
+        let start = Instant::now();
+        let result = integrity_job(Duration::from_millis(20), move |_| {
+            blocked.recv().unwrap();
+            finished.send(()).unwrap();
+            Ok(String::new())
+        });
+        release.send(()).unwrap();
+        done.recv_timeout(Duration::from_secs(1)).unwrap();
+        assert_eq!(result.unwrap_err().kind(), io::ErrorKind::TimedOut);
+        assert!(start.elapsed() < Duration::from_secs(1));
+    }
+
+    #[test]
+    fn integrity_hashes_small_files_without_changing_the_digest() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("synthetic-browser");
+        let bytes = b"synthetic browser bytes";
+        fs::write(&path, bytes).unwrap();
+        assert_eq!(
+            sha256(&path).unwrap(),
+            format!("{:x}", Sha256::digest(bytes))
+        );
+    }
+
+    #[test]
+    fn integrity_rejects_oversized_files_before_hashing() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("oversized-synthetic-browser");
+        // Sparse: no allocation of a large browser payload or disk data.
+        File::create(&path).unwrap().set_len((1 << 30) + 1).unwrap();
+        let (sender, receiver) = mpsc::channel();
+        thread::spawn(move || {
+            let _ = sender.send(sha256(&path));
+        });
+        let result = receiver.recv_timeout(Duration::from_secs(1));
+        assert!(
+            matches!(result, Ok(Err(ref error)) if error.kind() == io::ErrorKind::InvalidData),
+            "oversized executable was not rejected before hashing"
+        );
+    }
 }

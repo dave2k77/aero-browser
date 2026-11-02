@@ -7,6 +7,11 @@ if [[ $# -ne 1 ]]; then
   exit 2
 fi
 
+if ! command -v python3 >/dev/null 2>&1; then
+  printf 'python3 is required to check the browser pin.\n' >&2
+  exit 2
+fi
+
 root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 status=0
 report="$(cargo run --quiet --locked --manifest-path "$root/Cargo.toml" -p aero-cli -- \
@@ -16,7 +21,7 @@ if [[ $status -ne 0 && $status -ne 2 ]]; then
   exit "$status"
 fi
 
-printf '%s\n' "$report" | python -c '
+printf '%s\n' "$report" | python3 -c '
 import json, sys
 report = json.load(sys.stdin)
 if report["browser"]["available"] and report["browser_lock"]["status"] == "matched_local_pin":

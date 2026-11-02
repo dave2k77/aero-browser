@@ -84,6 +84,67 @@ fn doctor_version_probe_times_out() {
 }
 
 #[test]
+fn doctor_probe_cleans_descendants_after_root_exit() {
+    for exit_code in [0, 1] {
+        let directory = tempfile::tempdir().unwrap();
+        let browser = executable(
+            directory.path(),
+            &format!(
+                "sleep 30 &\nprintf '%s' \"$!\" > \"${{0%/*}}/descendant.pid\"\nprintf 'Chromium 123.0.0.0\\n'\nexit {exit_code}"
+            ),
+        );
+        let output = doctor(&browser);
+        assert_descendant_stopped(directory.path());
+        let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(report["browser"]["available"], exit_code == 0);
+        if exit_code != 0 {
+            assert_eq!(report["browser"]["error"], "version_command_failed");
+        }
+    }
+}
+
+#[test]
+fn doctor_probe_cleans_descendants_on_timeout() {
+    let directory = tempfile::tempdir().unwrap();
+    let browser = executable(
+        directory.path(),
+        "sleep 30 &\nprintf '%s' \"$!\" > \"${0%/*}/descendant.pid\"\nwhile :; do :; done",
+    );
+    let output = doctor(&browser);
+    assert_descendant_stopped(directory.path());
+    let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["browser"]["error"], "version_timeout");
+}
+
+fn assert_descendant_stopped(directory: &Path) {
+    let pid: u32 = fs::read_to_string(directory.join("descendant.pid"))
+        .unwrap()
+        .parse()
+        .unwrap();
+    let running = || {
+        fs::read_to_string(format!("/proc/{pid}/stat"))
+            .ok()
+            .and_then(|stat| {
+                stat.rsplit_once(')')
+                    .map(|(_, rest)| !rest.trim_start().starts_with("Z "))
+            })
+            .unwrap_or(false)
+    };
+    let deadline = Instant::now() + Duration::from_secs(1);
+    while running() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    let leaked = running();
+    if leaked {
+        // Always contain the deliberate red-state fixture before asserting.
+        let _ = Command::new("/bin/kill")
+            .args(["-KILL", &pid.to_string()])
+            .status();
+    }
+    assert!(!leaked, "diagnostic left its synthetic descendant running");
+}
+
+#[test]
 fn doctor_failed_version_hides_untrusted_output() {
     let directory = tempfile::tempdir().unwrap();
     let browser = executable(
