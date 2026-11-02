@@ -7,8 +7,8 @@ publish.workspace = true
 
 [features]
 # Compiles the tests that launch the real pinned Chromium (C04). They need
-# AERO_CHROMIUM and a working Bubblewrap; with AERO_REQUIRE_BROWSER=1 a missing
-# prerequisite fails instead of skipping.
+# AERO_CHROMIUM and a working Bubblewrap; a missing prerequisite is a test
+# failure, never a skip (implementation plan §6, SPEC-30).
 browser-tests = []
 
 [dependencies]

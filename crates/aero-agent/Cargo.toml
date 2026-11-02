@@ -5,6 +5,12 @@ edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
 
+[features]
+# Compiles the real-browser acceptance scenarios (tests/scenarios.rs). They need
+# AERO_CHROMIUM and a working Bubblewrap; a missing prerequisite is a test
+# failure, never a skip (implementation plan §6, SPEC-30).
+browser-tests = []
+
 [dependencies]
 aero-core.workspace = true
 aero-cdp.workspace = true
@@ -19,3 +25,4 @@ sha2.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+tokio = { workspace = true, features = ["io-util", "macros", "net", "rt", "rt-multi-thread", "sync", "time"] }

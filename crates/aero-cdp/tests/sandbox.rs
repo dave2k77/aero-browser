@@ -646,20 +646,13 @@ mod browser {
     /// Browser tests share one host process table; run them one at a time.
     static SERIAL: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
-    /// The pinned browser, or `None` to skip (a failure when required).
-    fn chromium() -> Option<PathBuf> {
-        let required = std::env::var("AERO_REQUIRE_BROWSER").as_deref() == Ok("1");
-        let found = std::env::var_os("AERO_CHROMIUM")
+    /// The pinned browser. With this feature enabled a missing browser is a
+    /// failure, never a skip (implementation plan §6, SPEC-30).
+    fn chromium() -> PathBuf {
+        std::env::var_os("AERO_CHROMIUM")
             .map(PathBuf::from)
-            .and_then(|path| std::fs::canonicalize(path).ok());
-        if found.is_none() {
-            assert!(
-                !required,
-                "AERO_REQUIRE_BROWSER=1 but AERO_CHROMIUM is unset or missing"
-            );
-            eprintln!("skipping: set AERO_CHROMIUM to the pinned Chromium executable");
-        }
-        found
+            .and_then(|path| std::fs::canonicalize(path).ok())
+            .expect("browser-tests requires AERO_CHROMIUM to name the pinned Chromium executable")
     }
 
     struct Run {
@@ -766,7 +759,7 @@ mod browser {
 
     #[tokio::test]
     async fn launch_reaches_cdp() {
-        let Some(chrome) = chromium() else { return };
+        let chrome = chromium();
         let _serial = SERIAL.lock().await;
         let run = prepare(&chrome);
         let browser = BrowserProcess::launch(&run.spec, LaunchLimits::default())
@@ -798,7 +791,7 @@ mod browser {
 
     #[tokio::test]
     async fn readiness_failure_reaps_child() {
-        let Some(chrome) = chromium() else { return };
+        let chrome = chromium();
         let _serial = SERIAL.lock().await;
 
         // Deadline too short for Chromium to write its port file.
@@ -829,7 +822,7 @@ mod browser {
 
     #[tokio::test]
     async fn sandbox_cannot_read_host_canary() {
-        let Some(chrome) = chromium() else { return };
+        let chrome = chromium();
         let _serial = SERIAL.lock().await;
         let nonce = format!(
             "{}",
@@ -887,7 +880,7 @@ mod browser {
 
     #[tokio::test]
     async fn renderer_sandbox_remains_enabled() {
-        let Some(chrome) = chromium() else { return };
+        let chrome = chromium();
         let _serial = SERIAL.lock().await;
         let run = prepare(&chrome);
         let browser = BrowserProcess::launch(&run.spec, LaunchLimits::default())

@@ -1,8 +1,27 @@
 # AeroBrowser — implementation handoff
 
-Document-set revision: 2.25. Current checkpoint: chain batch CH-10 (C04) below, uncommitted and ready for review. Everything through 34fca13 (CH-9, C03) is committed and pushed. Prior checkpoints below are historical where their next actions or test counts differ.
+Document-set revision: 2.26. Current checkpoint: chain batch CH-11 (C07) below, uncommitted and ready for review. Everything through 93c975d (CH-10, C04) is committed and pushed. Prior checkpoints below are historical where their next actions or test counts differ.
 
-## Current chain batch CH-10 checkpoint
+## Current chain batch CH-11 checkpoint
+
+The owner said “yes, go ahead” to committing C04 and starting the next package. C04 was committed as 93c975d and pushed (remote main read back at the same SHA). The plan's Batch C order is C01–C04, then C07, then C05–C06, so the next package was C07 (fixture harness), not C05 as the previous report proposed.
+
+CH-11 — C07 deterministic mandatory fixture harness, uncommitted, WSL2 evidence:
+
+- Correction to committed C04: its browser tests printed a skip notice and passed unless `AERO_REQUIRE_BROWSER=1` was set, contrary to §6 ("No `return`/`Ok(())` escape on unavailable prerequisites") and SPEC-30. With `--features browser-tests` a missing `AERO_CHROMIUM` now fails all four (observed: 4 failed with the expected message).
+- `crates/aero-agent/tests/support/fixture_server.rs`: test-only static server on tokio (already locked; aero-agent dev-dependency features `io-util, macros, net, rt, rt-multi-thread, sync, time`, no new crates) instead of Axum. Serves `tests/fixtures/<name>.html` for names `[a-z0-9-]+.html` only (404 otherwise, including `..` paths that would lead back to a real fixture), GET/HEAD (405 otherwise), 8 KiB/5 s request-head bound, `Connection: close`, request log. The accept loop owns a `JoinSet` of connections; `shutdown` stops and joins within 5 s (then aborts and errors); drop aborts.
+- `crates/aero-agent/tests/support/browser.rs`: `BrowserHarness::launch` takes B06 private directories (`StateConfig::resolve` in a 0700 temp home → `acquire_task` → `create_runtime`), so C03's run-directory contract is exercised against the real B06 layout, then the C04 launcher. Missing `AERO_CHROMIUM`/Bubblewrap is an error the test reports. Field order drops the browser (blocking, pidfd-verified) before its directories and lease; `shutdown` runs teardown via `spawn_blocking` and requires `sandbox_emptied`.
+- `crates/aero-agent/tests/support/mod.rs`: `Fixture { cdp, browser, server }` (drop order connection → browser → server; no async work in `Drop`), `serial()`, `wait_until` (event predicate; lag or a closed stream is an error, never a stale continue), `eventually` (bounded polling for state without a reliable event), `http_get`, `refuses_connections`, `sandbox_processes`. `crates/aero-agent/tests/fixtures/basic.html`. Other §5 fixtures arrive with their consumer packages.
+- `fixture_harness_smoke` (`crates/aero-agent/tests/scenarios.rs`): observed red against a stub `Fixture::start`, then green. Asserts the server answers and refuses traversal/uppercase names; the browser answers CDP, creates a page that reaches the fixture URL (event) and the fixture title (polled `Target.getTargets`), and the server logged `GET /basic.html`; shutdown is verified; then a spawned scenario that starts a fixture and panics still leaves no sandbox process and a closed server port.
+- Finding for C05: Chrome 156 did not emit `Target.targetInfoChanged` for the title change of an unattached page within 10 s (only the URL placeholder title), although `Target.getTargets` showed the loaded title. Page state must come from an attached session or polling, not that event.
+- Mutation pass on the harness: name validation (caught after replacing a traversal path that the `.html` suffix rule already refused), browser leaked on drop (caught); server abort on drop is defence in depth — dropping the stop sender also ends the loop; removing both was first observed as a hang (unbounded shutdown join), so `shutdown` is now bounded and that double mutant fails cleanly. Not exercised by any test: `wait_until` lag handling and the harness's report of an unverified teardown (the underlying pidfd check is unit-tested in aero-cdp). A timed-out mutant run left a stray test binary, which was found and killed; no sandbox processes remained.
+- Gates: workspace 284 passed (scenarios compile to no tests without the feature), 0 failed/ignored; aero-cdp + aero-agent with both `browser-tests` features and the browser: 193 passed; five extra smoke runs passed; warning-denied Clippy for the workspace and for both crates with browser features, fmt, warning-denied rustdoc, the documentation checker and `git diff --check` pass; Cargo.lock unchanged. Not independently reviewed.
+
+Limits: WSL2 only (ENV-004). The harness is serial (one browser at a time). The server is HTTP/1.0-style one request per connection; no TLS, cookies or cross-origin fixtures yet (cross-site OOPIF scenarios need a second origin, e.g. another loopback port, when D04 arrives). `scripts/test-browser.sh` (the complete required browser suite on prepared native Linux) does not exist yet.
+
+Next: C05 target attachment and navigation (`page_target_navigation` in `crates/aero-agent/tests/scenarios.rs`), then C06.
+
+## Previous chain batch CH-10 checkpoint (committed 93c975d)
 
 The owner said “yes, go ahead” to committing C03 and starting C04. C03 was committed as 34fca13 and pushed (remote main read back at the same SHA).
 
@@ -22,7 +41,7 @@ Limits: WSL2 only — native Ubuntu 24.04 with AppArmor's unprivileged user-name
 
 Next: C05 target attachment and navigation (one auto-attach authority, page sessions distinct from the browser session).
 
-## Previous chain batch CH-9 checkpoint (committed 34fca13)
+### Earlier: chain batch CH-9 checkpoint (committed 34fca13)
 
 The owner (returning from Telegram-driven work in another session) said: “check the changes thoroughly and if all is well push and move on to the next task.” CH-8 was reviewed (see its review bullet below), committed as de6c2e0 and pushed with a540588; remote main read back at de6c2e0.
 
