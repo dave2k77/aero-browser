@@ -5,6 +5,7 @@ pub mod checkpoint;
 pub mod events;
 pub mod form;
 pub mod ids;
+pub mod task;
 pub mod types;
 mod wire;
 
