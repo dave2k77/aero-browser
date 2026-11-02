@@ -7,6 +7,7 @@ pub mod form;
 pub mod ids;
 pub mod task;
 pub mod types;
+pub mod verification;
 mod wire;
 
 pub use wire::ValidationError;
