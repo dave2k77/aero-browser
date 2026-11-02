@@ -223,5 +223,28 @@ CREATE TABLE criterion_results (
     PRIMARY KEY(task_id, contract_revision, criterion_id, session_id),
     FOREIGN KEY(session_id, task_id, contract_revision) REFERENCES sessions(id, task_id, contract_revision) ON DELETE CASCADE
 ) STRICT;
+CREATE TABLE retention_holds (
+    task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+    id TEXT NOT NULL CHECK(length(id) > 0 AND length(id) <= 256),
+    created_at TEXT NOT NULL,
+    PRIMARY KEY(task_id, id)
+) STRICT;
+-- DEC-011: no task ID, title or content; survives the task cascade forever.
+CREATE TABLE task_tombstones (
+    task_key TEXT PRIMARY KEY NOT NULL CHECK(length(task_key) = 64 AND task_key NOT GLOB '*[^0-9a-f]*'),
+    state TEXT NOT NULL CHECK(state IN ('deleting','complete')),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+) STRICT;
+CREATE TRIGGER tombstone_is_permanent BEFORE DELETE ON task_tombstones
+BEGIN SELECT RAISE(ABORT, 'deletion tombstones are permanent'); END;
+CREATE TRIGGER tombstone_identity_is_immutable BEFORE UPDATE OF task_key,created_at ON task_tombstones
+BEGIN SELECT RAISE(ABORT, 'tombstone identity is immutable'); END;
+CREATE TRIGGER tombstone_only_completes BEFORE UPDATE OF state ON task_tombstones
+WHEN NOT (OLD.state = 'deleting' AND NEW.state = 'complete')
+BEGIN SELECT RAISE(ABORT, 'tombstones only move from deleting to complete'); END;
+CREATE TRIGGER no_tombstone_replacement BEFORE INSERT ON task_tombstones
+WHEN EXISTS(SELECT 1 FROM task_tombstones WHERE task_key=NEW.task_key)
+BEGIN SELECT RAISE(ABORT, 'tombstone already exists'); END;
 PRAGMA application_id = 1095062095;
 PRAGMA user_version = 1;

@@ -1,17 +1,14 @@
-//! Read-only filesystem preflight, **not** permission or a guarantee to delete.
+//! Task retention: a read-only preflight and the file half of coordinated
+//! deletion.
 //!
-//! This module never creates or removes task content or the stable lock inode. A
-//! successful lock only excludes cooperative TaskLease, ArtifactStore and
-//! RuntimeDirs owners while the returned guard is alive. Copied paths, untracked
-//! writers, and malicious same-UID/root processes are outside that guarantee.
-//! The journal has no unified writer gate/tombstone and no retention-hold store
-//! exists. Consequently every acquired guard remains blocked: neither a caller's
-//! assertion nor a model-provided status can authorize deletion. Even a future
-//! journal read could race a subsequent write (TOCTOU) unless admission and
-//! deletion are coordinated by an authoritative protocol. This API does not
-//! establish journal task ownership or provide any deletion operation.
+//! `preflight` never creates or removes task content or the stable lock inode;
+//! it only excludes cooperative TaskLease, ArtifactStore and RuntimeDirs owners
+//! while its guard is alive and always reports blocked. Deletion itself is
+//! `TaskAuthority::delete_task`: journal tombstone and record removal first,
+//! then the crate-private `purge_task_files` under the task lock. Copied paths, untracked
+//! writers, and malicious same-UID/root processes are outside these guarantees.
 
-use crate::config::{PrivateState, path_key};
+use crate::config::{PrivateState, TaskLease, path_key};
 use crate::store::{StoreError, private_file};
 use aero_core::ids::TaskId;
 use std::ffi::CString;
@@ -130,6 +127,113 @@ fn check_link(parent: &File, name: &str, file: &File) -> Result<(), StoreError> 
         || (stat.st_mode & libc::S_IFMT) != (metadata.mode() & libc::S_IFMT)
     {
         return Err(StoreError::UnsafePath);
+    }
+    Ok(())
+}
+
+/// Upper bounds for one purge; exceeding either leaves the deletion pending.
+const MAX_PURGE_ENTRIES: usize = 100_000;
+const MAX_PURGE_DEPTH: usize = 32;
+
+/// Remove everything inside a locked task directory except its permanent
+/// `controller.lock`, then sync the directory. Called only by the deletion
+/// coordinator after the journal has recorded the `deleting` tombstone.
+///
+/// Descriptor-relative and no-follow: symlinks are unlinked, never followed;
+/// hard links lose only this name; a subdirectory on another device (a mount)
+/// is refused (UnsafePath) rather than crossed. Errors leave the tombstone
+/// `deleting` so `TaskAuthority::resume_deletions` can retry. Unlinking is not
+/// secure erasure and cannot recall exported or remote copies.
+pub(crate) fn purge_task_files(lease: &TaskLease) -> Result<(), StoreError> {
+    let shell = lease.shell();
+    let device = shell.metadata().map_err(|_| StoreError::Io)?.dev();
+    let mut budget = MAX_PURGE_ENTRIES;
+    for name in entry_names(shell)? {
+        if name.as_bytes() == b"controller.lock" {
+            continue;
+        }
+        remove_entry(shell, &name, device, 0, &mut budget)?;
+    }
+    shell.sync_all().map_err(|_| StoreError::Io)
+}
+
+fn entry_names(directory: &File) -> Result<Vec<CString>, StoreError> {
+    use std::os::unix::ffi::OsStrExt;
+    // The live owned descriptor, as the store opener and reconciliation do.
+    let listing = std::fs::read_dir(format!("/proc/self/fd/{}", directory.as_raw_fd()))
+        .map_err(|_| StoreError::Io)?;
+    let mut names = Vec::new();
+    for entry in listing {
+        let entry = entry.map_err(|_| StoreError::Io)?;
+        names.push(CString::new(entry.file_name().as_bytes()).map_err(|_| StoreError::UnsafePath)?);
+    }
+    Ok(names)
+}
+
+fn remove_entry(
+    parent: &File,
+    name: &CString,
+    device: u64,
+    depth: usize,
+    budget: &mut usize,
+) -> Result<(), StoreError> {
+    *budget = budget.checked_sub(1).ok_or(StoreError::BudgetExceeded)?;
+    let mut stat: libc::stat = unsafe { std::mem::zeroed() };
+    // SAFETY: valid parent fd, NUL-terminated single component, writable buffer.
+    if unsafe {
+        libc::fstatat(
+            parent.as_raw_fd(),
+            name.as_ptr(),
+            &mut stat,
+            libc::AT_SYMLINK_NOFOLLOW,
+        )
+    } != 0
+    {
+        return match std::io::Error::last_os_error().raw_os_error() {
+            Some(libc::ENOENT) => Ok(()),
+            _ => Err(StoreError::Io),
+        };
+    }
+    if stat.st_mode & libc::S_IFMT == libc::S_IFDIR {
+        if stat.st_dev != device {
+            return Err(StoreError::UnsafePath);
+        }
+        if depth >= MAX_PURGE_DEPTH {
+            return Err(StoreError::BudgetExceeded);
+        }
+        // SAFETY: as above; O_NOFOLLOW|O_DIRECTORY refuse a swapped-in link.
+        let fd = unsafe {
+            libc::openat(
+                parent.as_raw_fd(),
+                name.as_ptr(),
+                libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+            )
+        };
+        if fd < 0 {
+            return Err(StoreError::UnsafePath);
+        }
+        // SAFETY: new owned descriptor from openat.
+        let child = unsafe { File::from_raw_fd(fd) };
+        let opened = child.metadata().map_err(|_| StoreError::Io)?;
+        if opened.dev() != stat.st_dev || opened.ino() != stat.st_ino {
+            return Err(StoreError::UnsafePath);
+        }
+        for inner in entry_names(&child)? {
+            remove_entry(&child, &inner, device, depth + 1, budget)?;
+        }
+        drop(child);
+        // SAFETY: valid parent fd and name; removes only an empty directory.
+        if unsafe { libc::unlinkat(parent.as_raw_fd(), name.as_ptr(), libc::AT_REMOVEDIR) } != 0 {
+            return Err(StoreError::Io);
+        }
+    } else {
+        // SAFETY: valid parent fd and name; unlinks the entry itself, never a
+        // symlink target.
+        if unsafe { libc::unlinkat(parent.as_raw_fd(), name.as_ptr(), 0) } != 0
+            && std::io::Error::last_os_error().raw_os_error() != Some(libc::ENOENT)
+        {
+            return Err(StoreError::Io);
+        }
     }
     Ok(())
 }

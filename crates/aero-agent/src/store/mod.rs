@@ -39,6 +39,10 @@ pub enum StoreError {
     PermissionDenied,
     StartBlocked,
     UnknownPricing,
+    /// The task was deleted; its ID cannot be reused in this state root.
+    Deleted,
+    /// A retention hold prevents starting deletion.
+    Held,
 }
 impl std::fmt::Display for StoreError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -63,6 +67,8 @@ impl std::fmt::Display for StoreError {
             Self::PermissionDenied => "caller does not have task authority",
             Self::StartBlocked => "task start prerequisites are not satisfied",
             Self::UnknownPricing => "inference monetary ceiling requires known upper-bound pricing",
+            Self::Deleted => "task was deleted and its ID cannot be reused",
+            Self::Held => "a retention hold prevents deleting this task",
         })
     }
 }

@@ -55,7 +55,9 @@ fn raw(path: &Path) -> Connection {
 
 #[test]
 fn sql_only_delete_does_not_remove_artifacts_or_stop_live_writer() {
-    // Documents an existing N16 gap, not a complete or safe task deletion.
+    // The raw journal call is only the journal half of deletion: it leaves a
+    // `deleting` tombstone but cannot stop a live writer or remove files.
+    // `TaskAuthority::delete_task` takes the task lock first (tests/deletion.rs).
     let parent = tempfile::tempdir().unwrap();
     std::fs::set_permissions(parent.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
     let state = StateConfig::resolve(Some(parent.path()), None)

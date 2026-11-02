@@ -1256,7 +1256,8 @@ fn schema_and_foreign_keys() {
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(tables, 12);
+    // Includes N16's retention_holds and permanent task_tombstones.
+    assert_eq!(tables, 14);
     seed(&connection, "task-a", "run-a");
     assert!(connection.execute("INSERT INTO sessions(id,task_id,contract_revision,goal,status,created_at,updated_at) VALUES ('orphan','missing',1,'test','paused','now','now')", []).is_err());
     assert!(connection.execute("INSERT INTO tasks(id,status,created_at,updated_at) VALUES ('task-a','draft','now','now')", []).is_err());

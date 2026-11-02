@@ -1,8 +1,25 @@
 # AeroBrowser — implementation handoff
 
-Document-set revision: 2.19. Current checkpoint: chain batch CH-4 below (uncommitted, ready for review). Everything through 7f88df2 (CH-3) is committed and pushed. Prior checkpoints below are historical where their next actions or test counts differ.
+Document-set revision: 2.20. Current checkpoint: chain batch CH-5 below (uncommitted, ready for review). Everything through fa09ba9 (CH-4) is committed and pushed. Prior checkpoints below are historical where their next actions or test counts differ.
 
-## Current chain batch CH-4 checkpoint
+## Current chain batch CH-5 checkpoint
+
+CH-4 was approved, committed as fa09ba9 and pushed (remote main read back at the same SHA). The owner then said “yes, go ahead” to CH-5.
+
+CH-5 — coordinated task deletion (N16), uncommitted, per DEC-010 (in-place schema) and DEC-011 (tombstone):
+
+- Schema: `retention_holds(task_id, id, created_at)` cascading with the task; `task_tombstones(task_key, state, created_at, updated_at)` with no task ID or content, permanent (no delete), immutable key/created time, state only `deleting` → `complete`, no replacement. Schema identity test now expects 14 tables.
+- `crates/aero-agent/src/store/worker.rs`: `JournalClient::delete_task` is now the journal half — one transaction refuses Held (any hold) or NeedsReview (unresolved work), writes the `deleting` tombstone and deletes the task's records; repeating while deleting is Ok, after completion Deleted. `create_task` and `place_hold` refuse tombstoned IDs with the new `StoreError::Deleted`. Crate-private `complete_deletion`, `pending_deletions` (bounded 1024), `place_hold`, `release_hold`. New `StoreError::Held`.
+- `crates/aero-agent/src/retention.rs`: crate-private `purge_task_files(&TaskLease)` removes everything except `controller.lock`, descriptor-relative, unlinking links without following them, refusing other-device directories, bounded to 100,000 entries and depth 32, then syncs the task directory. `config.rs`: `acquire_task_key` (by hashed key) and crate-private `TaskLease::shell`.
+- `crates/aero-agent/src/tasks.rs`: `TaskAuthority::delete_task(&state, &task)` = retire gateways → nonblocking task lock (Busy, nothing changed, while any lease/store/runtime is live) → journal half → purge → complete; `resume_deletions(&state)` finishes `deleting` tombstones; owner-only `TaskClient::place_hold` / `release_hold`.
+- Tests in new binary `crates/aero-agent/tests/deletion.rs`: purge of artifacts, evidence, runtime profile/staging and an outward symlink (target preserved) with the other task intact and the tombstone holding only key/state/timestamps; holds and a prepared action block deletion before it starts, and holds cannot be placed afterwards; journal-half-only deletion resumed after a journal restart, idempotently. All three observed red against stubs, then green. The old SQL-only test comment now describes the journal half.
+- Gates: workspace 246 passed (233 behavior + 13 compile-fail doctests), 0 failed/ignored; warning-denied Clippy, fmt and warning-denied rustdoc pass; 15 repeated runs of the deletion, retention and task suites passed. Not independently reviewed.
+
+Limits: deletion is blocking (host thread). Gateways are retired even if deletion is then refused. Filesystem leases do not consult tombstones: a later `acquire_task` for a deleted ID can create files, but the journal refuses all its writes and `delete_task` returns Deleted; such files are not purged automatically. Unlinking is not secure erasure, and exported/remote copies are not recalled. Tasks with unresolved effects cannot be deleted until reviewed (there is no reconciliation API yet). The hashed key is pseudonymous.
+
+Next: CH-6 N05 atomic completion gate.
+
+## Previous chain batch CH-4 checkpoint (committed fa09ba9)
 
 CH-3 was approved, committed as 7f88df2 and pushed (remote main read back at the same SHA). The owner then said “yes, go ahead” to CH-4.
 
@@ -17,7 +34,7 @@ Limits: retirement happens before submission and is not undone if the journal re
 
 Next: CH-5 N16 coordinated deletion with the DEC-011 tombstone.
 
-## Previous chain batch CH-3 checkpoint (committed 7f88df2)
+### Earlier: chain batch CH-3 checkpoint (committed 7f88df2)
 
 CH-2 was approved, committed as 3a9c3ce and pushed (remote main read back at the same SHA). The owner then said “yes, go ahead” to CH-3.
 

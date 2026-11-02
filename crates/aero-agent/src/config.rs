@@ -86,7 +86,18 @@ impl PrivateState {
         (&self._root, &self.tasks)
     }
     pub fn acquire_task(&self, id: &TaskId) -> Result<TaskLease, StoreError> {
-        let key = path_key(b"task", id.as_str())?;
+        self.acquire_task_key(path_key(b"task", id.as_str())?)
+    }
+    /// Lock a task directory by its hashed key (resuming a deletion only knows
+    /// the key). Same creation, ownership and lock rules as `acquire_task`.
+    pub(crate) fn acquire_task_key(&self, key: String) -> Result<TaskLease, StoreError> {
+        if key.len() != 64
+            || !key
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        {
+            return Err(StoreError::InvalidInput);
+        }
         let directory = private_child_directory(&self.tasks, &key, false)?;
         let lock = private_file(&directory, "controller.lock", true)?.ok_or(StoreError::Io)?;
         // SAFETY: live owned fd, cooperative exclusive nonblocking lock. Never
@@ -131,6 +142,10 @@ impl TaskLease {
 
     pub fn directory(&self) -> &Path {
         &self.owner.path
+    }
+    /// The locked task directory descriptor, for N16 cleanup in this crate.
+    pub(crate) fn shell(&self) -> &File {
+        &self.owner.directory
     }
     /// Each launch/rebuild needs a fresh RuntimeEpoch. Existing epochs are never
     /// reopened, overwritten or cleaned up, including partial failed creation.

@@ -21,6 +21,7 @@
 //! }
 //! ```
 
+use crate::config::PrivateState;
 use crate::data_flow::{GatewayHost, GatewayLink};
 use crate::store::StoreError;
 use crate::store::worker::{AuditPage, Journal, JournalClient, Reply, ResumeState};
@@ -91,6 +92,44 @@ impl TaskAuthority {
     pub fn register_gateway(&self, host: &GatewayHost) -> Result<(), StoreError> {
         self.gateways.register(host.link())
     }
+    /// Coordinated task deletion (N16). Blocking: call from a host thread, not
+    /// an async executor.
+    ///
+    /// 1. Retire the task's registered gateways (not undone if later refused).
+    /// 2. Take the task lock without waiting: a live `TaskLease`, store or
+    ///    runtime handle makes this Busy and nothing else changes.
+    /// 3. Journal transaction: refuse on a hold (Held) or unresolved work
+    ///    (NeedsReview); otherwise write the permanent `deleting` tombstone and
+    ///    delete the task's records, closing all task admission.
+    /// 4. Remove the task's files, keeping only the directory and its lock.
+    /// 5. Mark the tombstone complete.
+    ///
+    /// A failure after step 3 leaves the tombstone `deleting`; call
+    /// [`Self::resume_deletions`] (for example at startup) to finish. The ID can
+    /// never be reused in this state root. Exported or remote copies are not
+    /// recalled, and unlinking is not secure erasure.
+    pub fn delete_task(&self, state: &PrivateState, task: &TaskId) -> Result<(), StoreError> {
+        self.gateways.retire(task);
+        let lease = state.acquire_task(task)?;
+        self.journal.delete_task(task.clone())?.blocking_recv()?;
+        crate::retention::purge_task_files(&lease)?;
+        self.journal
+            .complete_deletion(crate::config::path_key(b"task", task.as_str())?)?
+            .blocking_recv()
+    }
+    /// Finish deletions whose tombstone is still `deleting` (e.g. after a
+    /// crash). Returns how many were completed. Busy if a task is in use.
+    pub fn resume_deletions(&self, state: &PrivateState) -> Result<usize, StoreError> {
+        let keys = self.journal.pending_deletions()?.blocking_recv()?;
+        for key in &keys {
+            let lease = state.acquire_task_key(key.clone())?;
+            crate::retention::purge_task_files(&lease)?;
+            self.journal
+                .complete_deletion(key.clone())?
+                .blocking_recv()?;
+        }
+        Ok(keys.len())
+    }
     /// Host-selected task scope. An ID does not authenticate a remote requester.
     pub fn model_for_task(&self, task_id: TaskId) -> Result<TaskClient, StoreError> {
         if task_id.as_str().trim().is_empty()
@@ -156,6 +195,16 @@ impl TaskClient {
     ) -> Result<Reply<()>, StoreError> {
         self.require_owner()?.retire(&context.task_id);
         self.journal.start_run(context, prerequisites)
+    }
+    /// Place a named retention hold. While any hold exists, deletion cannot
+    /// start; holds cannot stop a deletion already started (DEC-011).
+    pub fn place_hold(&self, task: TaskId, hold: String) -> Result<Reply<()>, StoreError> {
+        self.require_owner()?;
+        self.journal.place_hold(task, hold)
+    }
+    pub fn release_hold(&self, task: TaskId, hold: String) -> Result<Reply<()>, StoreError> {
+        self.require_owner()?;
+        self.journal.release_hold(task, hold)
     }
     /// Task-scoped data. The host must still apply privacy/data-flow policy before
     /// sending private intent/history to a provider or another recipient.

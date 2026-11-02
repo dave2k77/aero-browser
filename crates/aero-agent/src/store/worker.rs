@@ -281,15 +281,46 @@ impl JournalClient {
         identifier(task_id.as_str())?;
         self.submit(move |s| load_artifacts(&s.connection, &task_id))
     }
-    /// Deletes SQL-owned records only, not files/profiles/derived stores (N16).
-    /// This operation does not acquire the task lease or stop an existing writer.
-    /// It is not safe to expose as complete task deletion or a retention purge:
-    /// private files can remain and a live ArtifactStore can continue writing.
-    /// The host must not use it as a user-facing deletion operation until N16
-    /// adds a coordinated admission gate, durable retry and derived-data cleanup.
+    /// Journal half of task deletion (N16). In one transaction: refuse if a
+    /// retention hold exists (Held) or work is unresolved (NeedsReview), record
+    /// a permanent `deleting` tombstone keyed by the hashed task ID (DEC-011)
+    /// and delete the task's SQL records, closing all task admission. Files are
+    /// NOT removed: use `TaskAuthority::delete_task`, which takes the task lock
+    /// first and completes the tombstone; `TaskAuthority::resume_deletions`
+    /// finishes an interrupted deletion. Repeating while `deleting` is Ok; a
+    /// completed deletion is Deleted.
     pub fn delete_task(&self, task_id: TaskId) -> Result<Reply<()>, StoreError> {
         identifier(task_id.as_str())?;
         self.submit(move |s| s.delete_task(task_id))
+    }
+    /// Mark a `deleting` tombstone complete after file cleanup; idempotent.
+    pub(crate) fn complete_deletion(&self, task_key: String) -> Result<Reply<()>, StoreError> {
+        task_key_valid(&task_key)?;
+        self.submit(move |s| complete_deletion(&s.connection, &task_key))
+    }
+    /// Hashed keys of deletions that have not finished file cleanup.
+    pub(crate) fn pending_deletions(&self) -> Result<Reply<Vec<String>>, StoreError> {
+        self.submit(move |s| pending_deletions(&s.connection))
+    }
+    /// Owner-only via `TaskClient`. Holds block starting a deletion; they
+    /// cannot stop one already started (DEC-011).
+    pub(crate) fn place_hold(
+        &self,
+        task_id: TaskId,
+        hold: String,
+    ) -> Result<Reply<()>, StoreError> {
+        identifier(task_id.as_str())?;
+        identifier(&hold)?;
+        self.submit(move |s| place_hold(&s.connection, &task_id, &hold))
+    }
+    pub(crate) fn release_hold(
+        &self,
+        task_id: TaskId,
+        hold: String,
+    ) -> Result<Reply<()>, StoreError> {
+        identifier(task_id.as_str())?;
+        identifier(&hold)?;
+        self.submit(move |s| release_hold(&s.connection, &task_id, &hold))
     }
 }
 
@@ -554,6 +585,9 @@ impl Store {
         let tx = sql(self
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate))?;
+        if tombstone_state(&tx, &contract.task_id)?.is_some() {
+            return Err(StoreError::Deleted);
+        }
         sql(tx.execute(
             "INSERT INTO tasks(id,status,created_at,updated_at) VALUES (?1,'draft',?2,?2)",
             params![contract.task_id.as_str(), now],
@@ -809,12 +843,38 @@ impl Store {
         Ok(AuditPage { entries, has_more })
     }
     fn delete_task(&mut self, task_id: TaskId) -> Result<(), StoreError> {
+        let key = crate::config::path_key(b"task", task_id.as_str())?;
+        let now = stamp()?;
         let tx = sql(self
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate))?;
+        let exists: bool = sql(tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM tasks WHERE id=?1)",
+            [task_id.as_str()],
+            |r| r.get(0),
+        ))?;
+        if !exists {
+            return match tombstone_state(&tx, &task_id)?.as_deref() {
+                Some("deleting") => Ok(()),
+                Some(_) => Err(StoreError::Deleted),
+                None => Err(StoreError::NotFound),
+            };
+        }
         no_pending(&tx, &task_id)?;
+        let held: bool = sql(tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM retention_holds WHERE task_id=?1)",
+            [task_id.as_str()],
+            |r| r.get(0),
+        ))?;
+        if held {
+            return Err(StoreError::Held);
+        }
+        sql(tx.execute(
+            "INSERT INTO task_tombstones VALUES (?1,'deleting',?2,?2)",
+            params![key, now],
+        ))?;
         if sql(tx.execute("DELETE FROM tasks WHERE id=?1", [task_id.as_str()]))? != 1 {
-            return Err(StoreError::NotFound);
+            return Err(StoreError::Conflict);
         }
         sql(tx.commit())
     }
@@ -1013,6 +1073,101 @@ fn read_run(
 }
 fn has_pending(c: &Connection, task: &TaskId) -> Result<bool, StoreError> {
     sql(c.query_row("SELECT EXISTS(SELECT 1 FROM actions a JOIN sessions s ON s.id=a.session_id WHERE s.task_id=?1 AND a.state IN ('prepared','uncertain')) OR EXISTS(SELECT 1 FROM budget_reservations WHERE task_id=?1 AND state IN ('reserved','uncertain')) OR EXISTS(SELECT 1 FROM work_reservations WHERE task_id=?1 AND state IN ('reserved','uncertain')) OR EXISTS(SELECT 1 FROM tasks WHERE id=?1 AND status='needs_review')",[task.as_str()],|r|r.get(0)))
+}
+/// The deletion tombstone state for a task ID, if it was ever deleted.
+fn tombstone_state(c: &Connection, task: &TaskId) -> Result<Option<String>, StoreError> {
+    let key = crate::config::path_key(b"task", task.as_str())?;
+    sql(c
+        .query_row(
+            "SELECT state FROM task_tombstones WHERE task_key=?1",
+            [key],
+            |r| r.get(0),
+        )
+        .optional())
+}
+fn task_key_valid(key: &str) -> Result<(), StoreError> {
+    if key.len() != 64
+        || !key
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    {
+        return Err(StoreError::InvalidInput);
+    }
+    Ok(())
+}
+fn complete_deletion(c: &Connection, key: &str) -> Result<(), StoreError> {
+    let now = stamp()?;
+    if sql(c.execute(
+        "UPDATE task_tombstones SET state='complete',updated_at=?2 WHERE task_key=?1 AND state='deleting'",
+        params![key, now],
+    ))? == 1
+    {
+        return Ok(());
+    }
+    let state: Option<String> = sql(c
+        .query_row(
+            "SELECT state FROM task_tombstones WHERE task_key=?1",
+            [key],
+            |r| r.get(0),
+        )
+        .optional())?;
+    match state.as_deref() {
+        Some("complete") => Ok(()),
+        _ => Err(StoreError::NotFound),
+    }
+}
+/// Upper bound on unfinished deletions returned at once.
+const MAX_PENDING_DELETIONS: usize = 1024;
+fn pending_deletions(c: &Connection) -> Result<Vec<String>, StoreError> {
+    let mut statement = sql(c.prepare(
+        "SELECT task_key FROM task_tombstones WHERE state='deleting' ORDER BY task_key LIMIT ?1",
+    ))?;
+    let keys = sql(statement
+        .query_map([integer(MAX_PENDING_DELETIONS as u64 + 1)?], |r| {
+            r.get::<_, String>(0)
+        })
+        .and_then(|rows| rows.collect::<Result<Vec<_>, _>>()))?;
+    if keys.len() > MAX_PENDING_DELETIONS {
+        return Err(StoreError::BudgetExceeded);
+    }
+    for key in &keys {
+        task_key_valid(key).map_err(|_| StoreError::CorruptDatabase)?;
+    }
+    Ok(keys)
+}
+fn place_hold(c: &Connection, task: &TaskId, hold: &str) -> Result<(), StoreError> {
+    let exists: bool = sql(c.query_row(
+        "SELECT EXISTS(SELECT 1 FROM tasks WHERE id=?1)",
+        [task.as_str()],
+        |r| r.get(0),
+    ))?;
+    if !exists {
+        return Err(if tombstone_state(c, task)?.is_some() {
+            StoreError::Deleted
+        } else {
+            StoreError::NotFound
+        });
+    }
+    let inserted = sql(c.execute(
+        "INSERT OR IGNORE INTO retention_holds VALUES (?1,?2,?3)",
+        params![task.as_str(), hold, stamp()?],
+    ))?;
+    if inserted == 1 {
+        Ok(())
+    } else {
+        Err(StoreError::Conflict)
+    }
+}
+fn release_hold(c: &Connection, task: &TaskId, hold: &str) -> Result<(), StoreError> {
+    if sql(c.execute(
+        "DELETE FROM retention_holds WHERE task_id=?1 AND id=?2",
+        params![task.as_str(), hold],
+    ))? == 1
+    {
+        Ok(())
+    } else {
+        Err(StoreError::NotFound)
+    }
 }
 fn no_pending(c: &Connection, task: &TaskId) -> Result<(), StoreError> {
     if has_pending(c, task)? {
