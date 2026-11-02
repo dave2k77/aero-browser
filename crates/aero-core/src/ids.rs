@@ -23,6 +23,13 @@
 //! fn needs_session(_: CdpSessionId) {}
 //! needs_session(ObservationId::from("same-wire-value"));
 //! ```
+//!
+//! Durable task and run references are different from one another:
+//! ```compile_fail,E0308
+//! use aero_core::ids::{RunId, TaskId};
+//! fn needs_task(_: TaskId) {}
+//! needs_task(RunId::from("same-wire-value"));
+//! ```
 
 // These wrappers preserve protocol bytes without normalization or ID generation.
 // A typed value alone does not establish issuer, ownership, freshness or authority;
@@ -74,6 +81,23 @@ string_id!(
     "An observation snapshot that scopes its transient handles."
 );
 
+string_id!(
+    TaskId,
+    "A durable task identity, never a run or browser target."
+);
+string_id!(
+    RunId,
+    "A run of a task contract revision, not durable task identity."
+);
+string_id!(
+    EvidenceId,
+    "An evidence reference; ownership/content validation is separate."
+);
+string_id!(
+    ArtifactId,
+    "An artifact reference, not a host filename or path."
+);
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -89,6 +113,10 @@ mod tests {
             TypeId::of::<RuntimeEpoch>(),
             TypeId::of::<DocumentEpoch>(),
             TypeId::of::<ObservationId>(),
+            TypeId::of::<TaskId>(),
+            TypeId::of::<RunId>(),
+            TypeId::of::<EvidenceId>(),
+            TypeId::of::<ArtifactId>(),
         ];
         assert_eq!(ids.into_iter().collect::<HashSet<_>>().len(), ids.len());
     }
@@ -138,5 +166,30 @@ mod tests {
         values.insert(id.clone(), "owned-target");
         assert_eq!(values.get(&id), Some(&"owned-target"));
         assert_eq!(values.get(&TargetId::from("different")), None);
+    }
+
+    #[test]
+    fn durable_ids_preserve_wire_values_without_implying_authority() {
+        macro_rules! check {
+            ($id:ty) => {
+                for raw in ["  opaque:雪/01  ", ""] {
+                    let id = <$id>::from(raw);
+                    assert_eq!(
+                        serde_json::from_str::<$id>(&serde_json::to_string(&id).unwrap()).unwrap(),
+                        id
+                    );
+                }
+                for invalid in ["null", "1", "true", "[]", "{}"] {
+                    assert!(serde_json::from_str::<$id>(invalid).is_err());
+                }
+                let mut map = std::collections::HashMap::new();
+                map.insert(<$id>::from("owned"), "value");
+                assert_eq!(map.get(&<$id>::from("owned")), Some(&"value"));
+            };
+        }
+        check!(TaskId);
+        check!(RunId);
+        check!(EvidenceId);
+        check!(ArtifactId);
     }
 }
