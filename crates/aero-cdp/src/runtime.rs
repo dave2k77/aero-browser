@@ -29,7 +29,12 @@ use std::sync::{Arc, Mutex, mpsc};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
+use aero_core::ids::TargetId;
+
 use crate::launcher::SandboxSpec;
+use crate::page::Page;
+use crate::target_registry::{AttachError, TargetInfo, TargetRegistry};
+use crate::{CdpConnection, CdpError, TransportLimits};
 
 /// How long Bubblewrap may take to create its namespace init. Separate from
 /// the readiness deadline so teardown can always be verified.
@@ -109,6 +114,139 @@ pub struct ShutdownReport {
     pub status: Option<ExitStatus>,
     /// True once the sandbox PID namespace was observed empty.
     pub sandbox_emptied: bool,
+}
+
+/// Why a browser runtime operation failed.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum RuntimeError {
+    Launch(LaunchError),
+    Cdp(CdpError),
+    Attach(AttachError),
+    /// The page's session is no longer owned by the registry.
+    Detached,
+    /// The browser rejected a navigation (its `errorText`, untrusted).
+    NavigationFailed(String),
+    /// No tab appeared before the deadline.
+    NoTab,
+}
+
+impl std::fmt::Display for RuntimeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Launch(error) => write!(f, "browser launch failed: {error}"),
+            Self::Cdp(error) => write!(f, "CDP error: {error}"),
+            Self::Attach(error) => write!(f, "attach failed: {error:?}"),
+            Self::Detached => f.write_str("the page session is detached"),
+            Self::NavigationFailed(_) => f.write_str("the browser rejected the navigation"),
+            Self::NoTab => f.write_str("no tab appeared in time"),
+        }
+    }
+}
+
+impl std::error::Error for RuntimeError {}
+
+impl From<CdpError> for RuntimeError {
+    fn from(error: CdpError) -> Self {
+        Self::Cdp(error)
+    }
+}
+
+/// The owned browser: sandboxed process, its CDP connection and the target
+/// registry. There is no global connection; everything browser-side is
+/// reached through this value. Field order is drop order.
+pub struct BrowserRuntime {
+    registry: TargetRegistry,
+    connection: Arc<CdpConnection>,
+    process: Option<BrowserProcess>,
+}
+
+impl BrowserRuntime {
+    /// Launch, connect, and start target discovery.
+    pub async fn start(spec: &SandboxSpec, limits: LaunchLimits) -> Result<Self, RuntimeError> {
+        // On any later error the launched process is dropped, which tears the
+        // sandbox down.
+        let process = BrowserProcess::launch(spec, limits)
+            .await
+            .map_err(RuntimeError::Launch)?;
+        let connection =
+            Arc::new(CdpConnection::connect(process.endpoint(), TransportLimits::default()).await?);
+        let registry = TargetRegistry::start(Arc::clone(&connection)).await?;
+        Ok(Self {
+            registry,
+            connection,
+            process: Some(process),
+        })
+    }
+
+    /// The browser-level connection (no session). Page methods sent here fail:
+    /// use a [`Page`].
+    pub fn connection(&self) -> &CdpConnection {
+        &self.connection
+    }
+
+    pub fn targets(&self) -> Vec<TargetInfo> {
+        self.registry.targets()
+    }
+
+    pub fn tabs(&self) -> Vec<TargetInfo> {
+        self.registry.tabs()
+    }
+
+    pub fn target(&self, id: &TargetId) -> Option<TargetInfo> {
+        self.registry.target(id)
+    }
+
+    /// Times the target registry rebuilt itself after missing events.
+    pub fn resyncs(&self) -> u64 {
+        self.registry.resyncs()
+    }
+
+    /// The first tab, waiting up to `timeout` for one to be discovered.
+    pub async fn wait_for_tab(&self, timeout: Duration) -> Result<TargetInfo, RuntimeError> {
+        let deadline = Instant::now() + timeout;
+        loop {
+            if let Some(tab) = self.tabs().into_iter().next() {
+                return Ok(tab);
+            }
+            if Instant::now() >= deadline {
+                return Err(RuntimeError::NoTab);
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+    }
+
+    /// Attach to a tab; the registry refuses a second session for it.
+    pub async fn attach(&self, target: &TargetId) -> Result<Page, RuntimeError> {
+        let session = self
+            .registry
+            .attach(target)
+            .await
+            .map_err(RuntimeError::Attach)?;
+        Ok(Page::new(
+            Arc::clone(self.registry.connection()),
+            self.registry.handle(),
+            target.clone(),
+            session,
+        ))
+    }
+
+    /// Stop the registry, close the connection and tear the sandbox down.
+    pub async fn shutdown(mut self) -> ShutdownReport {
+        self.registry.stop().await;
+        self.connection.close().await;
+        match self.process.take() {
+            Some(process) => tokio::task::spawn_blocking(move || process.shutdown())
+                .await
+                .unwrap_or(ShutdownReport {
+                    status: None,
+                    sandbox_emptied: false,
+                }),
+            None => ShutdownReport {
+                status: None,
+                sandbox_emptied: false,
+            },
+        }
+    }
 }
 
 /// One running sandboxed browser. Dropping it tears the sandbox down

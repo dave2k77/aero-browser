@@ -1,19 +1,19 @@
 //! Sandboxed browser for scenarios (test-only): B06 private task/run/runtime
-//! directories, the C03 sandbox command and the C04 owned process.
+//! directories, the C03 sandbox command and the C04/C05 `BrowserRuntime`.
 //!
-//! Field order is drop order: the browser process is torn down (blocking,
-//! verified by pidfd) before its directories and task lease are released.
+//! Field order is drop order: the runtime (registry, connection, then the
+//! pidfd-verified process) is torn down before its directories and lease.
 
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 
 use aero_agent::config::{PrivateState, RuntimeDirs, StateConfig, TaskLease};
 use aero_cdp::launcher::{Display, HostLayout, SandboxRequest, SandboxSpec, Viewport};
-use aero_cdp::runtime::{BrowserProcess, LaunchLimits};
+use aero_cdp::runtime::{BrowserRuntime, LaunchLimits};
 use aero_core::ids::{RunId, RuntimeEpoch, TaskId};
 
 pub struct BrowserHarness {
-    process: Option<BrowserProcess>,
+    runtime: Option<BrowserRuntime>,
     _runtime: RuntimeDirs,
     _lease: TaskLease,
     _state: PrivateState,
@@ -64,11 +64,11 @@ impl BrowserHarness {
             locale: "C.UTF-8".into(),
         })
         .map_err(|e| format!("sandbox: {e}"))?;
-        let process = BrowserProcess::launch(&spec, LaunchLimits::default())
+        let browser = BrowserRuntime::start(&spec, LaunchLimits::default())
             .await
-            .map_err(|e| format!("browser launch: {e} ({e:?})"))?;
+            .map_err(|e| format!("browser runtime: {e} ({e:?})"))?;
         Ok(Self {
-            process: Some(process),
+            runtime: Some(browser),
             _runtime: runtime,
             _lease: lease,
             _state: state,
@@ -76,21 +76,18 @@ impl BrowserHarness {
         })
     }
 
-    pub fn endpoint(&self) -> &str {
-        self.process
+    pub fn runtime(&self) -> &BrowserRuntime {
+        self.runtime
             .as_ref()
-            .map(BrowserProcess::endpoint)
-            .unwrap_or_default()
+            .expect("the runtime lives until shutdown consumes the harness")
     }
 
-    /// Tear the sandbox down off the async threads and require it verified empty.
+    /// Stop the runtime and require the sandbox verified empty.
     pub async fn shutdown(mut self) -> Result<(), String> {
-        let Some(process) = self.process.take() else {
+        let Some(runtime) = self.runtime.take() else {
             return Ok(());
         };
-        let report = tokio::task::spawn_blocking(move || process.shutdown())
-            .await
-            .map_err(|e| e.to_string())?;
+        let report = runtime.shutdown().await;
         if report.sandbox_emptied {
             Ok(())
         } else {

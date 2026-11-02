@@ -1,10 +1,11 @@
 //! Shared browser-scenario harness (C07, implementation plan §9).
 //!
-//! `Fixture` owns a local fixture server, a sandboxed browser and a CDP
-//! connection. Cleanup is synchronous and owned: dropping a fixture (including
-//! while a failed assertion unwinds) closes the connection, tears the browser
-//! sandbox down with pidfd verification, and aborts the server — no async work
-//! runs inside `Drop`. `shutdown` does the same and reports failures.
+//! `Fixture` owns a local fixture server and a sandboxed `BrowserRuntime`
+//! (process, CDP connection, target registry). Cleanup is synchronous and
+//! owned: dropping a fixture (including while a failed assertion unwinds)
+//! stops the registry, closes the connection, tears the browser sandbox down
+//! with pidfd verification, and aborts the server — no async work runs inside
+//! `Drop`. `shutdown` does the same and reports failures.
 
 pub mod browser;
 pub mod fixture_server;
@@ -12,6 +13,7 @@ pub mod fixture_server;
 use std::net::SocketAddr;
 use std::time::Duration;
 
+use aero_cdp::runtime::BrowserRuntime;
 use aero_cdp::{CdpConnection, CdpError, CdpEvent, EventStream};
 
 pub use browser::BrowserHarness;
@@ -27,38 +29,34 @@ pub async fn serial() -> tokio::sync::MutexGuard<'static, ()> {
     SERIAL.lock().await
 }
 
-/// Field order is drop order: connection, then browser, then server.
+/// Field order is drop order: browser runtime, then server.
 pub struct Fixture {
-    pub cdp: CdpConnection,
     pub browser: BrowserHarness,
     pub server: FixtureServer,
 }
 
 impl Fixture {
-    /// Start the server, then the browser, then connect. On any error the
-    /// parts already started are dropped, which tears them down.
+    /// Start the server, then the browser runtime. On any error the parts
+    /// already started are dropped, which tears them down.
     pub async fn start() -> Result<Self, String> {
         let server = FixtureServer::start()
             .await
             .map_err(|e| format!("fixture server: {e}"))?;
         let browser = BrowserHarness::launch().await?;
-        let cdp = CdpConnection::connect(browser.endpoint(), aero_cdp::TransportLimits::default())
-            .await
-            .map_err(|e| format!("CDP connection: {e}"))?;
-        Ok(Self {
-            cdp,
-            browser,
-            server,
-        })
+        Ok(Self { browser, server })
+    }
+
+    pub fn runtime(&self) -> &BrowserRuntime {
+        self.browser.runtime()
+    }
+
+    /// The browser-level CDP connection (no session).
+    pub fn cdp(&self) -> &CdpConnection {
+        self.runtime().connection()
     }
 
     pub async fn shutdown(self) -> Result<(), String> {
-        let Self {
-            cdp,
-            browser,
-            server,
-        } = self;
-        cdp.close().await;
+        let Self { browser, server } = self;
         let browser = browser.shutdown().await;
         let server = server.shutdown().await;
         browser.and(server)

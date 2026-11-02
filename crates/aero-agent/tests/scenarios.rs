@@ -38,14 +38,14 @@ async fn fixture_harness_smoke() {
 
     // The browser answers over CDP and loads the fixture from the server.
     let version = fixture
-        .cdp
+        .cdp()
         .call("Browser.getVersion", json!({}), None, support::CALL)
         .await
         .unwrap();
     assert!(version["product"].as_str().unwrap().contains("Chrome/"));
-    let mut events = fixture.cdp.subscribe();
+    let mut events = fixture.cdp().subscribe();
     fixture
-        .cdp
+        .cdp()
         .call(
             "Target.setDiscoverTargets",
             json!({ "discover": true }),
@@ -56,7 +56,7 @@ async fn fixture_harness_smoke() {
         .unwrap();
     let url = fixture.server.url("basic.html");
     let created = fixture
-        .cdp
+        .cdp()
         .call(
             "Target.createTarget",
             json!({ "url": url }),
@@ -79,7 +79,7 @@ async fn fixture_harness_smoke() {
     // Poll path: the loaded document's title becomes the target title.
     let title = support::eventually(Duration::from_secs(10), || async {
         let targets = fixture
-            .cdp
+            .cdp()
             .call("Target.getTargets", json!({}), None, support::CALL)
             .await
             .ok()?;
@@ -133,4 +133,170 @@ async fn fixture_harness_smoke() {
         support::refuses_connections(address, Duration::from_secs(2)).await,
         "fixture server stopped during unwinding"
     );
+}
+
+/// C05: one attachment owner, tabs exclude non-page targets, page methods go
+/// to the page's own session, and navigation really changes title and URL.
+#[cfg(feature = "browser-tests")]
+#[tokio::test]
+async fn page_target_navigation() {
+    use aero_cdp::CdpError;
+    use aero_cdp::page::Page;
+    use aero_cdp::runtime::RuntimeError;
+    use aero_cdp::target_registry::{AttachError, TargetKind};
+    use serde_json::{Value, json};
+    use std::time::Duration;
+
+    async fn document(page: &Page) -> Option<(String, String)> {
+        let reply = page
+            .call(
+                "Runtime.evaluate",
+                json!({
+                    "expression": "document.readyState === 'complete' ? [document.title, location.href] : null",
+                    "returnByValue": true
+                }),
+            )
+            .await
+            .ok()?;
+        match &reply["result"]["value"] {
+            Value::Array(pair) => {
+                Some((pair[0].as_str()?.to_owned(), pair[1].as_str()?.to_owned()))
+            }
+            _ => None,
+        }
+    }
+
+    let _serial = support::serial().await;
+    let fixture = support::Fixture::start()
+        .await
+        .expect("required native browser fixture failed to start");
+    let runtime = fixture.runtime();
+
+    // Existing targets were enumerated: the startup tab is known without
+    // creating anything, and only real pages count as tabs.
+    let tab = runtime
+        .wait_for_tab(Duration::from_secs(10))
+        .await
+        .expect("the startup tab is discovered");
+    assert_eq!(tab.kind, TargetKind::Page);
+    for target in runtime.targets() {
+        assert_eq!(
+            runtime
+                .tabs()
+                .iter()
+                .any(|t| t.target_id == target.target_id),
+            target.kind == TargetKind::Page && !target.url.starts_with("devtools://"),
+            "{target:?}"
+        );
+    }
+
+    // One owner: an explicit flattened session, and no second one.
+    let page = runtime
+        .attach(&tab.target_id)
+        .await
+        .expect("attach the tab");
+    assert_ne!(page.session().as_str(), tab.target_id.as_str());
+    assert_eq!(
+        runtime.attach(&tab.target_id).await.err(),
+        Some(RuntimeError::Attach(AttachError::AlreadyAttached))
+    );
+    // Chromium always exposes non-tab targets (browser UI, extension service
+    // workers); they are discovered but cannot be attached as tabs.
+    let other = support::eventually(Duration::from_secs(5), || async {
+        runtime.targets().into_iter().find(|t| !t.is_tab())
+    })
+    .await
+    .expect("a non-tab target is discovered");
+    assert!(
+        !runtime
+            .tabs()
+            .iter()
+            .any(|t| t.target_id == other.target_id)
+    );
+    assert_eq!(
+        runtime.attach(&other.target_id).await.err(),
+        Some(RuntimeError::Attach(AttachError::NotATab))
+    );
+
+    // Page methods belong to the page session; the browser endpoint is not a page.
+    assert!(matches!(
+        runtime
+            .connection()
+            .call(
+                "Runtime.evaluate",
+                json!({ "expression": "1" }),
+                None,
+                support::CALL
+            )
+            .await,
+        Err(CdpError::Protocol { .. })
+    ));
+
+    // Navigation changes the actual document, observed through the session.
+    for (name, title) in [
+        ("basic.html", "AeroBrowser basic fixture"),
+        ("second.html", "AeroBrowser second fixture"),
+    ] {
+        let url = fixture.server.url(name);
+        page.navigate(&url).await.expect("navigation starts");
+        let seen = support::eventually(Duration::from_secs(10), || async {
+            document(&page)
+                .await
+                .filter(|(t, href)| t == title && *href == url)
+        })
+        .await;
+        assert_eq!(seen, Some((title.to_owned(), url.clone())));
+        let registered = support::eventually(Duration::from_secs(10), || async {
+            runtime.target(&tab.target_id).filter(|t| t.url == url)
+        })
+        .await;
+        assert!(
+            registered.is_some(),
+            "the registry follows the tab to {url}"
+        );
+    }
+
+    // A navigation the browser rejects is an error, not a silent success.
+    let refused = page.navigate("http://127.0.0.1:1/unreachable.html").await;
+    assert!(
+        matches!(refused, Err(RuntimeError::NavigationFailed(ref text)) if text.contains("ERR_")),
+        "{refused:?}"
+    );
+    assert_eq!(runtime.resyncs(), 0, "no events were missed");
+    assert!(
+        fixture
+            .server
+            .requests()
+            .iter()
+            .any(|r| r == "GET /second.html")
+    );
+
+    // Closing the tab ends the registry's session; the page then refuses calls
+    // instead of sending them to a dead or reused session.
+    fixture
+        .cdp()
+        .call(
+            "Target.closeTarget",
+            json!({ "targetId": tab.target_id.as_str() }),
+            None,
+            support::CALL,
+        )
+        .await
+        .expect("close the tab");
+    let detached = support::eventually(Duration::from_secs(10), || async {
+        match page
+            .call("Runtime.evaluate", json!({ "expression": "1" }))
+            .await
+        {
+            Err(RuntimeError::Detached) => Some(()),
+            _ => None,
+        }
+    })
+    .await;
+    assert!(detached.is_some(), "a closed tab's page refuses calls");
+    assert!(runtime.target(&tab.target_id).is_none());
+
+    drop(page);
+    fixture.shutdown().await.expect("teardown");
+    assert_eq!(support::sandbox_processes(), Vec::<u32>::new());
 }

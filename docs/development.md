@@ -59,7 +59,7 @@ Real-browser tests are behind `browser-tests` features and need the pinned brows
 ```bash
 export AERO_CHROMIUM="$HOME/.cache/aerobrowser/browsers/156.0.8078.47/chrome-linux64/chrome"
 cargo test -p aero-cdp --locked --test sandbox --features browser-tests -- --nocapture
-cargo test -p aero-agent --locked --features browser-tests --test scenarios fixture_harness_smoke -- --exact --nocapture
+cargo test -p aero-agent --locked --features browser-tests --test scenarios -- --nocapture
 ```
 
 `AERO_BWRAP` selects Bubblewrap (default `/usr/bin/bwrap`). `AERO_REQUIRE_BROWSER=1` is still accepted in documented commands but no longer changes behaviour. Without the feature, `tests/scenarios.rs` compiles to no tests, so the default workspace suite needs no browser.

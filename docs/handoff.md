@@ -1,8 +1,27 @@
 # AeroBrowser — implementation handoff
 
-Document-set revision: 2.26. Current checkpoint: chain batch CH-11 (C07) below, uncommitted and ready for review. Everything through 93c975d (CH-10, C04) is committed and pushed. Prior checkpoints below are historical where their next actions or test counts differ.
+Document-set revision: 2.27. Current checkpoint: chain batch CH-12 (C05) below, uncommitted and ready for review. Everything through e538e20 (CH-11, C07) is committed and pushed. Prior checkpoints below are historical where their next actions or test counts differ.
 
-## Current chain batch CH-11 checkpoint
+## Current chain batch CH-12 checkpoint
+
+The owner said “yes, go ahead” to committing C07 and starting C05. C07 was committed as e538e20 and pushed (remote main read back at the same SHA).
+
+CH-12 — C05 page target attachment and navigation, uncommitted, WSL2 evidence:
+
+- `crates/aero-cdp/src/target_registry.rs`: `TargetRegistry::start` subscribes first, spawns the owned listener, enables `Target.setDiscoverTargets`, then merges a `Target.getTargets` snapshot. `RegistryState` is pure (events/snapshots in, targets out) and applies only browser-level `Target.*` events. A snapshot is authoritative only for targets known before its request (a sequence mark), because an event for a newer target can be applied before the older snapshot reply; destroyed target IDs are remembered and never re-added. On `EventLag` the listener resyncs from a fresh snapshot (counted in `resyncs()`); a failed resync or a closed stream stops it with a recorded `failure()` instead of continuing on a stale map. Snapshots also drop our session for a target the browser no longer reports attached, since detach events may be missed.
+- Tabs: `TargetKind::Page` whose URL is not `devtools://`. Workers (`worker`, `shared_worker`, `service_worker`), iframes and Chromium UI (`browser_ui`, …) are discovered but are not tabs.
+- One attachment authority: `attach` is the only path, explicit `Target.attachToTarget` with `flatten: true`, refused for unknown targets, non-tabs and targets already attached or being attached; the in-flight reservation is released by a guard on failure or a dropped future; a target destroyed during the call is reported, not recorded. Nothing enables auto-attach.
+- `crates/aero-cdp/src/page.rs`: `Page::call` always carries the page's session and returns `Detached` once the registry no longer owns it; `navigate` returns `NavigationFailed(errorText)` for a navigation the browser rejects. Dropping a `Page` does not detach it (G05 owns detach/close/new tabs). Load/lifecycle waiting is C06.
+- `crates/aero-cdp/src/runtime.rs`: `BrowserRuntime::start` (launch → connect → registry), `connection()` (browser level only), `targets/tabs/target/resyncs`, `wait_for_tab`, `attach`, `shutdown` (registry, connection, then pidfd-verified process). `RuntimeError` covers launch, CDP, attach, detached, navigation and no-tab failures.
+- Harness: `BrowserHarness`/`Fixture` now own a `BrowserRuntime` (`fixture.runtime()`, `fixture.cdp()`); new fixture `crates/aero-agent/tests/fixtures/second.html`.
+- Tests: registry unit tests `events_maintain_targets_in_discovery_order`, `tabs_exclude_workers_frames_ui_and_devtools`, `snapshots_are_authoritative_but_never_revive_destroyed_targets`, `detach_and_destroy_end_our_session` (observed red against stubs, then green) and `targets_discovered_after_the_snapshot_request_are_kept` (added with the implementation; coverage, not red/green). `page_target_navigation` (observed red against a stub `BrowserRuntime::start`): startup tab enumerated without creating one; every non-tab target excluded from tabs and a discovered non-tab refused (`NotATab`); second attach refused; a session distinct from the target ID; browser-level `Runtime.evaluate` rejected by the browser; two navigations through the page session change the real `document.title`/`location.href` and the registry follows the URL; navigating to a closed loopback port is `NavigationFailed(net::ERR_…)`; zero resyncs; closing the tab makes the page return `Detached` and removes the target. Five consecutive scenario runs passed. Mutation pass: 13 defects (session-scoped events applied, destroyed IDs revived, snapshot mark ignored, snapshot removal skipped, detach ignored, devtools pages as tabs, second or non-tab attach, unflattened attach, listener ignoring events, page call without session, ownership check skipped, navigation errors ignored) — all caught. Subscribe-before-enable ordering was not mutation-tested (the initial snapshot would partly mask it).
+- Gates: workspace 289 passed (284 + 5), 0 failed/ignored; aero-cdp + aero-agent with browser features and the browser: 199 passed; warning-denied Clippy (workspace, and both crates with browser features), fmt, warning-denied rustdoc, the documentation checker and `git diff --check` pass; Cargo.lock unchanged. Not independently reviewed.
+
+Limits: WSL2 only (ENV-004). Lag resync is unit-reasoned but not exercised against a real browser. No same-document/SPA navigation, load waiting or stability (C06); no frames/OOPIF sessions (D04); no detach, tab creation/close or popup ownership API (G05).
+
+Next: C06 bounded page evaluation and lifecycle waits (`evaluate_exception_is_error`, `navigation_and_stability_deadlines`).
+
+## Previous chain batch CH-11 checkpoint (committed e538e20)
 
 The owner said “yes, go ahead” to committing C04 and starting the next package. C04 was committed as 93c975d and pushed (remote main read back at the same SHA). The plan's Batch C order is C01–C04, then C07, then C05–C06, so the next package was C07 (fixture harness), not C05 as the previous report proposed.
 
@@ -21,7 +40,7 @@ Limits: WSL2 only (ENV-004). The harness is serial (one browser at a time). The 
 
 Next: C05 target attachment and navigation (`page_target_navigation` in `crates/aero-agent/tests/scenarios.rs`), then C06.
 
-## Previous chain batch CH-10 checkpoint (committed 93c975d)
+### Earlier: chain batch CH-10 checkpoint (committed 93c975d)
 
 The owner said “yes, go ahead” to committing C03 and starting C04. C03 was committed as 34fca13 and pushed (remote main read back at the same SHA).
 
