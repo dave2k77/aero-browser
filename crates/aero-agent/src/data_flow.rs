@@ -20,9 +20,11 @@
 //! A transport error does not prove that no bytes were sent. Expiry uses wall-clock
 //! time, so clock rollback can extend validity; a reliable time source remains a host
 //! requirement. Encoded lengths and lifetime identity counts are bounded, but
-//! caller-supplied spare allocation capacity is not. The host
-//! must call `retire_run` on cancellation/run retirement; this is not integrated
-//! with the journal. Same-revision replacement needs a new host. Retirement and
+//! caller-supplied spare allocation capacity is not. Register each host with
+//! `TaskAuthority::register_gateway`: the owner's `start_run` and
+//! `revise_contract` then retire the task's gateways before the journal change
+//! is submitted. Other cancellation paths must still call `retire_run`.
+//! Same-revision replacement needs a new host. Retirement and
 //! host drop close handles after in-flight transport returns; both can block on a
 //! stuck transport. Transports must not retain strong host references: a cycle
 //! prevents host drop. Explicit retirement breaks such cycles even after poison;
@@ -37,11 +39,12 @@
 pub use aero_core::task::Classification;
 use aero_core::{
     checkpoint::{MAX_COUNTER, RunContext},
+    ids::TaskId,
     task::ProcessingMode,
 };
 use std::{
     collections::{HashMap, HashSet},
-    sync::{Arc, Mutex, MutexGuard},
+    sync::{Arc, Mutex, MutexGuard, Weak},
     time::SystemTime,
 };
 
@@ -263,31 +266,20 @@ impl GatewayHost {
         Ok(())
     }
     /// Irreversibly close this host's run. Waits for admitted sends; it cannot
-    /// cancel or recall a transport already in flight. Caller must wire this to
-    /// the real run lifecycle before presenting it as cancellation enforcement.
+    /// cancel or recall a transport already in flight. Registered gateways are
+    /// also retired by the owner's run start and contract revision.
     /// If the mutex was poisoned, still release retained state but return
     /// `Unavailable`; all restricted operations remain permanently fail-closed.
     pub fn retire_run(&self) -> Result<(), DispatchError> {
-        let (removed, poisoned) = {
-            let (mut state, poisoned) = match self.state.lock() {
-                Ok(state) => (state, false),
-                Err(error) => (error.into_inner(), true),
-            };
-            state.active = false;
-            let removed = (
-                std::mem::take(&mut state.grants),
-                std::mem::take(&mut state.payloads),
-                std::mem::take(&mut state.recipients),
-            );
-            (removed, poisoned)
-        };
-        // A transport destructor may re-enter a restricted handle. Drop after
-        // releasing the mutex, with the active flag already closed.
-        drop(removed);
-        if poisoned {
-            Err(DispatchError::Unavailable)
-        } else {
-            Ok(())
+        retire_state(&self.state)
+    }
+    /// Weak lifecycle link for the task authority; it never keeps the host,
+    /// its transports or handles alive.
+    pub(crate) fn link(&self) -> GatewayLink {
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        GatewayLink {
+            task: state.context.task_id.clone(),
+            state: Arc::downgrade(&self.state),
         }
     }
     pub fn revoke_grant(&self, id: &str) -> Result<(), DispatchError> {
@@ -319,6 +311,53 @@ impl GatewayHost {
         Ok(())
     }
 }
+/// Close admission and detach all retained state, even after poison. Waits for
+/// an admitted send; drops transports only after releasing the mutex because a
+/// transport destructor may re-enter a restricted handle.
+fn retire_state(state: &Mutex<State>) -> Result<(), DispatchError> {
+    let (removed, poisoned) = {
+        let (mut state, poisoned) = match state.lock() {
+            Ok(state) => (state, false),
+            Err(error) => (error.into_inner(), true),
+        };
+        state.active = false;
+        let removed = (
+            std::mem::take(&mut state.grants),
+            std::mem::take(&mut state.payloads),
+            std::mem::take(&mut state.recipients),
+        );
+        (removed, poisoned)
+    };
+    drop(removed);
+    if poisoned {
+        Err(DispatchError::Unavailable)
+    } else {
+        Ok(())
+    }
+}
+
+/// Crate-private weak reference used to retire a gateway on run lifecycle
+/// changes. Not exposed to adapters; it grants no dispatch or install ability.
+pub(crate) struct GatewayLink {
+    task: TaskId,
+    state: Weak<Mutex<State>>,
+}
+impl GatewayLink {
+    pub(crate) fn task(&self) -> &TaskId {
+        &self.task
+    }
+    pub(crate) fn is_live(&self) -> bool {
+        self.state.strong_count() > 0
+    }
+    /// Irreversible, like `GatewayHost::retire_run`; a dead gateway is a no-op.
+    pub(crate) fn retire(&self) {
+        if let Some(state) = self.state.upgrade() {
+            // Poison still closes and detaches; nothing further to report here.
+            let _ = retire_state(&state);
+        }
+    }
+}
+
 impl Drop for GatewayHost {
     fn drop(&mut self) {
         // `retire_run` closes and detaches even on poison; it drops transports

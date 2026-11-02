@@ -1,8 +1,23 @@
 # AeroBrowser — implementation handoff
 
-Document-set revision: 2.18. Current checkpoint: chain batch CH-3 below (uncommitted, ready for review). Everything through 3a9c3ce (CH-2) is committed and pushed. Prior checkpoints below are historical where their next actions or test counts differ.
+Document-set revision: 2.19. Current checkpoint: chain batch CH-4 below (uncommitted, ready for review). Everything through 7f88df2 (CH-3) is committed and pushed. Prior checkpoints below are historical where their next actions or test counts differ.
 
-## Current chain batch CH-3 checkpoint
+## Current chain batch CH-4 checkpoint
+
+CH-3 was approved, committed as 7f88df2 and pushed (remote main read back at the same SHA). The owner then said “yes, go ahead” to CH-4.
+
+CH-4 — gateway retirement wired to the run lifecycle (N13 slice), uncommitted:
+
+- `crates/aero-agent/src/data_flow.rs`: retirement logic extracted to `retire_state` (unchanged behaviour: closes admission, waits for an admitted send, detaches state even after poison, drops transports after unlocking); new crate-private weak `GatewayLink` from `GatewayHost::link`.
+- `crates/aero-agent/src/tasks.rs`: `TaskAuthority::register_gateway(&host)`; an owner-only registry (`Access::Owner` now carries it, model clients do not) with at most `MAX_GATEWAYS_PER_TASK` = 64 live links per task, dropped gateways pruned. The owner's `start_run` and `revise_contract` retire all registered gateways for the task, outside the registry lock, before submitting to the journal.
+- Tests in new binary `crates/aero-agent/tests/gateway_lifecycle.rs` (kept apart from the data_flow suite, which spawns child processes): new-run retirement observed before the commit reply is awaited, other tasks unaffected and a new gateway for the new run works; contract revision retires; model start/revise are denied without retiring; registration bound and pruning. All three observed red against a no-op registration (after fixing a fixture that reused a journal-wide run ID), then green.
+- Gates: workspace 243 passed (230 behavior + 13 compile-fail doctests), 0 failed/ignored; warning-denied Clippy, fmt and warning-denied rustdoc pass. Not independently reviewed.
+
+Limits: retirement happens before submission and is not undone if the journal rejects the request (fail closed: create a new gateway). It cannot recall a send already in flight and blocks on a stuck transport. Only gateways registered with the same `TaskAuthority` are covered; future N09 close and N16 deletion must use the same retirement. Still no real transport (DEC-004) or durable grants (N06).
+
+Next: CH-5 N16 coordinated deletion with the DEC-011 tombstone.
+
+## Previous chain batch CH-3 checkpoint (committed 7f88df2)
 
 CH-2 was approved, committed as 3a9c3ce and pushed (remote main read back at the same SHA). The owner then said “yes, go ahead” to CH-3.
 
@@ -19,7 +34,7 @@ Limits: nothing yet produces captures from a real authorized observation (needs 
 
 Next: CH-4 N13 gateway retirement wired to journal task cancellation.
 
-## Previous chain batch CH-2 checkpoint (committed 3a9c3ce)
+### Earlier: chain batch CH-2 checkpoint (committed 3a9c3ce)
 
 CH-1 was approved, committed as c2aa4a2 and pushed (remote main read back at the same SHA). The owner then said “yes, go ahead” to CH-2.
 
