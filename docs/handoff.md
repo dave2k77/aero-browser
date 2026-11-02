@@ -1,8 +1,26 @@
 # AeroBrowser — implementation handoff
 
-Document-set revision: 2.23. Current checkpoint: chain batch CH-8 below (reviewed by a second session; the owner approved commit and push after review). CH-7 is committed as a540588 and is pushed together with the CH-8 commit; everything through 960f50a (CH-6) was already pushed. Prior checkpoints below are historical where their next actions or test counts differ.
+Document-set revision: 2.24. Current checkpoint: chain batch CH-9 (C03) below, uncommitted and ready for review. Everything through de6c2e0 (CH-8, C01/C02) is committed and pushed; a540588 (CH-7) was pushed with it. Prior checkpoints below are historical where their next actions or test counts differ.
 
-## Current chain batch CH-8 checkpoint
+## Current chain batch CH-9 checkpoint
+
+The owner (returning from Telegram-driven work in another session) said: “check the changes thoroughly and if all is well push and move on to the next task.” CH-8 was reviewed (see its review bullet below), committed as de6c2e0 and pushed with a540588; remote main read back at de6c2e0.
+
+CH-9 — C03 pure sandbox command construction, uncommitted:
+
+- `crates/aero-cdp/src/launcher.rs`: `SandboxSpec::build(&SandboxRequest) -> Result<SandboxSpec, SandboxError>`. Inputs are resolved facts only (canonical bwrap and Chromium executables, the B06 run directory, a `HostLayout` of `lstat` kinds for `/usr`, `MERGED_USR_PATHS`, `ETC_RUNTIME_PATHS`, a `Display`, viewport, locale); nothing is read from the filesystem. Output: program, ordered args, the host `DevToolsActivePort` path (`<run>/profile/DevToolsActivePort`) and `isolation_limits()` (`HostNetwork` always, `X11Display` for X11).
+- Policy as built: user/PID/IPC/UTS namespaces, `--die-with-parent`, `--new-session`, `--cap-drop ALL`; `--clearenv` before `HOME=/home/aero`, `PATH=/usr/bin:/bin`, `LANG`; `/usr` read-only; merged-/usr links recreated with `--symlink` only if their normalized target resolves into `/usr` (directories bound; files, foreign or `..` targets refused); listed `/etc` runtime paths mounted only if present (a bind follows a symlinked source such as resolv.conf on the host); `--proc /proc`, `--dev /dev`, then tmpfs `/dev/shm`, `/tmp`, `/home/aero`; run `profile` and `staging` bound writable at `/home/aero/profile` and `/home/aero/staging`; Chromium's directory read-only at `/opt/aero/browser`; display mounts last (Wayland socket at `/run/aero/wayland-0` in a private tmpfs; X11 socket inside the private `/tmp` and authority at `/home/aero/.Xauthority`); `--chdir /home/aero`. Browser flags: `--remote-debugging-address=127.0.0.1 --remote-debugging-port=0 --user-data-dir=/home/aero/profile --no-first-run --no-default-browser-check [--headless] --window-size=W,H about:blank`; no sandbox-weakening flag is ever produced and callers cannot add flags.
+- Refusals: relative/unnormalized/NUL/root paths, Snap executables, an executable directly in `/`, a run directory equal to, inside or containing any read-only source (`/usr`, `/etc/...`, browser dir, display paths), viewport outside 1..=16384, locale outside `[A-Za-z0-9_.@-]{1,64}`, relative display paths.
+- Design choice: the builder takes the run directory and derives `profile`/`staging` (matching B06 `RuntimeDirs`), so it cannot be handed an arbitrary writable host directory. The browser mount is the executable's parent directory, so an executable placed directly in a broad directory would expose that directory read-only; C04 must pass the pinned, hashed browser from `packaging/browser-lock.json`.
+- Tests: `crates/aero-cdp/tests/sandbox.rs` — `command_policy`, `split_usr_directories_are_bound_and_missing_paths_skipped`, `unsupported_host_layouts_are_refused`, `unsafe_paths_are_refused`, `display_modes_expose_only_their_socket`; the test parser panics on any Bubblewrap option it does not know, so a new option (e.g. `--dev-bind`, `--bind-try`) fails the suite. All five observed red against a compiling scaffold (behavioral failures), then green; one assertion of mine was wrong (`--user-data-dir=/` matched the correct profile flag as a prefix) and was replaced by an exact single-profile check. Mutation pass: 22 defects, all caught.
+- One-off smoke, deleted afterwards and not part of any gate: probing the real host layout and running the generated command through local bwrap 0.11.1 with `/usr/bin/true` as the browser exited 0 with empty stderr — the mount plan is accepted on this WSL host. This is not C04 proof (no Chromium, no renderer sandbox, no canary).
+- Gates: workspace 278 passed (273 + 5), 0 failed/ignored; warning-denied Clippy, fmt, warning-denied rustdoc, the contributor documentation checker and `git diff --check` pass. No new dependency. Not independently reviewed.
+
+Limits and notes for C04: no `/sys`, `/etc/passwd` or GPU device access is provided — C04 measures what Chromium actually needs and adds only that, with tests; whether Chromium's own namespace sandbox works nested in this user namespace is C04's `renderer_sandbox_remains_enabled`. Spawn bwrap with an empty environment. Host network sharing includes abstract Unix sockets, so a compromised renderer that escaped Chromium's sandbox could reach an abstract X11 socket even in headless mode; network/abstract-socket isolation remains future work and is reported via `IsolationLimit::HostNetwork`.
+
+Next: C04 real launch (`launch_reaches_cdp`, `readiness_failure_reaps_child`, `sandbox_cannot_read_host_canary`, `renderer_sandbox_remains_enabled`) using the pinned Chrome for Testing 156.0.8078.47 build.
+
+## Previous chain batch CH-8 checkpoint (committed de6c2e0)
 
 The owner said “proceed to commit and move on to the next task”. CH-7 was rerun (workspace 256 passed, Clippy/fmt/rustdoc clean) and committed as a540588 — not pushed, because only a commit was requested. DEC-012 (claims format) remains pending; it blocks report generation, not the browser runtime.
 
@@ -20,7 +38,7 @@ Limits: tested against a fake WebSocket peer only — no Chromium, no `DevToolsA
 
 Next: C03 pure sandbox command construction (`SandboxSpec::build`), then C04 real launch.
 
-## Previous chain batch CH-7 checkpoint (committed a540588)
+### Earlier: chain batch CH-7 checkpoint (committed a540588)
 
 CH-6 was approved, committed as 960f50a and pushed (remote main read back at the same SHA). The owner then said “yes, go ahead” to CH-7.
 
