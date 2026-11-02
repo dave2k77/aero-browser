@@ -1,6 +1,6 @@
 # AeroBrowser — task-first implementation plan and specification corrections
 
-Revision 2.9. B02/B03, audit repairs, N01–N04 and B04–B06 are implemented locally, uncommitted; N03 local accounting and N04's synthetic verifier registry are ready for owner review. N05 and N17/N18 remain blocked after partial foundations. See the [current N17/N18 handoff](handoff.md#current-n17n18-blocked-checkpoint) for real tests, review findings and remaining limits. BATCH-00 and B01 primitives remain committed; B01 is recorded in 54e0a9573d8eb90746243f0f24056b05a3022988 after explicit user commit/push approval. Authoritative product/technical requirements remain in [specification.md](specification.md); the original PDF is historical source. Tested contracts, storage and diagnostics do not imply task/browser subsystem completion or release readiness.
+Revision 2.10. B02–B06, N01–N04, the audit repairs and the partial N05/N13/N16–N18 foundations are committed and pushed (0e7165b..5af0e9d). Owner decisions DEC-009 (no attestation), DEC-010 (edit the unshipped v1 schema in place) and DEC-011 (minimal permanent deletion tombstone) are accepted; the non-browser prerequisite chain is being resolved in small batches, starting with journal-backed artifact records (CH-1, uncommitted). See the [current handoff](handoff.md#current-chain-batch-ch-1-checkpoint). B01 is recorded in 54e0a9573d8eb90746243f0f24056b05a3022988. Authoritative product/technical requirements remain in [specification.md](specification.md); the original PDF is historical source. Tested contracts, storage and diagnostics do not imply task/browser subsystem completion or release readiness.
 
 ## Goal
 
@@ -153,7 +153,7 @@ The user approved the reviewed BATCH-00 commit/push. Root commit 5a4fac91e563873
 | N15 | not_started | — | — |
 | N16 | blocked | Hermes | Filesystem preflight only: retains fresh lock and always remains blocked on unknown holds/journal state. SQL-only deletion does not stop artifact writers. Proposed coordinated deletion requires trusted holds, admission closure, durable tombstones, privacy/cutover decisions and preserving schema strategy; no real deletion or migration. |
 | N17 | blocked | Hermes | Synthetic exact fact comparison is tested but caller-constructible and not provenance authority. Blocked on real observation capture, trusted classification, immutable repository/freshness and outcome transaction with a preserving database strategy. No database reset or migration authorized. |
-| N18 | blocked | Hermes | Private task-lease-bound byte staging and digest-checked reopen exist with classification-as-trusted-caller-assertion only. Blocked on N13 policy, N16 retention, evidence, durable bundle/journal reconciliation and safe export; independent review found no remaining confirmed defect in its snapshot. |
+| N18 | blocked | Hermes | Private task-lease-bound byte staging and digest-checked reopen exist with classification-as-trusted-caller-assertion only. Blocked on N13 policy, N16 retention, evidence, durable bundle/journal reconciliation and safe export; independent review found no remaining confirmed defect in its snapshot. CH-1 (uncommitted): journal artifact records must name a store-generated file owned by the attaching task; `JournalClient::load_artifact` and `ArtifactStore::verify` read actual bytes back against the immutable journal record (update/replace/individual delete refused). Still missing: orphan reconciliation, bundle manifest, export grant. |
 | N19 | not_started | — | — |
 | N20 | not_started | — | — |
 | N21 | not_started | — | — |
@@ -1255,6 +1255,8 @@ Files: `crates/aero-core/src/artifact.rs`, `crates/aero-agent/src/artifacts.rs`,
 2. Run `cargo test -p aero-agent --test artifacts bundle_manifest_matches_actual_outputs -- --exact` to red.
 3. Implement generated ArtifactIDs, bounded private atomic staging/finalization, readback/hash and source/criteria metadata; separate export grant. Add CLI artifact/evidence inspection with truthful freshness/limitations.
 4. Re-run green, including path/symlink/overwrite/cross-task/missing-evidence and no export-without-grant cases. This connects to G07/G08 before first G1 task, not late packaging polish.
+
+Implemented locally (CH-1, uncommitted): ID-ownership check on journal attachment and checkpoint load, immutable artifact rows, task-scoped record lookup and record-bound byte readback; tests `journal_artifact_records_must_name_task_staged_files`, `committed_artifact_reads_back_against_its_journal_record` and `committed_artifact_records_are_immutable_and_corruption_is_refused` in `crates/aero-agent/tests/artifacts.rs`, each observed red then green. Remaining before N18 can close: staged-but-unrecorded/recorded-but-missing reconciliation, the bundle manifest test above, and the export grant (N13).
 
 Approved commit: `feat(artifacts): deliver verified evidence-linked result bundles`.
 

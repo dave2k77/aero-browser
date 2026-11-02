@@ -166,7 +166,9 @@ The pre-N01 audit reproduced/fixed BUG-001 and three additional CLI issues below
 | DEC-006 | P1 | pending | Project owner | Supply/review protected holdout and freeze required workload/performance thresholds after baseline | N24 optimization/release acceptance claims |
 | DEC-007 | P2 | pending | Project owner | Decide whether background service, strong egress/intranet backend, Flatpak, or other measured optional features earn scope | Their separate backend/feasibility implementation gates |
 | DEC-008 | P0 | accepted | Project owner | User authorizes BUG-001 repair plus audit/fixes of implemented code before moving on | No N01/new feature, install/account operation, staging/commit/push or publication implied |
-| DEC-009 | P0 | pending | Project owner | N17/N18 authorized; decide trusted attestation and additional prerequisite scope | Full N05 completion gate and transition |
+| DEC-009 | P0 | accepted | Project owner | No attestation for now: only machine-verified criteria can complete a task; subjective criteria stay inconclusive/needs_review | Full N05 completion gate and transition |
+| DEC-010 | P0 | accepted | Project owner | Unshipped v1 journal schema is edited in place; development databases are disposable and older ones are refused; preserving migrations start at the first release | N16/N17/N18 storage changes |
+| DEC-011 | P0 | accepted | Project owner | Deletion tombstone keeps only the hashed task key, state and timestamps, permanently; holds cannot stop a deletion once it has started | N16 durable coordinated deletion |
 
 #### DEC-001 — Development setup authorization
 
@@ -204,7 +206,17 @@ Accepted: the user now says, “Ok, let's resolve this bug, and let's find any o
 
 #### DEC-009 — N05 prerequisite scope
 
-Partially resolved: the owner authorized N17/N18, but those packages now have only partial foundations and are blocked on the missing prerequisites in the [current handoff](handoff.md#current-n17n18-blocked-checkpoint). An explicitly permitted, attributed trusted-user attestation contract remains a separate decision. The current N05 pure predicate and narrow journal test do not establish completion, artifact/evidence truth or attestation. Finalization must close the transaction/freshness race described in the [N05 handoff](handoff.md#current-n05-checkpoint). No reset, migration, staging, commit or push was implied by the prerequisite approval.
+Accepted 2026-11-02: asked how criteria that cannot be machine-checked could ever pass, the owner chose “No attestation for now: such criteria stay inconclusive/needs_review and the task cannot auto-complete; only machine-verified criteria complete.” N05 therefore implements no attestation path, owner or model. A contract with a subjective criterion cannot reach completed; it stays needs_review. Revisiting attestation is a new decision, not an extension of this one.
+
+Historical record before acceptance — partially resolved: the owner authorized N17/N18, but those packages now have only partial foundations and are blocked on the missing prerequisites in the [current handoff](handoff.md#current-n17n18-blocked-checkpoint). An explicitly permitted, attributed trusted-user attestation contract remains a separate decision. The current N05 pure predicate and narrow journal test do not establish completion, artifact/evidence truth or attestation. Finalization must close the transaction/freshness race described in the [N05 handoff](handoff.md#current-n05-checkpoint). No reset, migration, staging, commit or push was implied by the prerequisite approval.
+
+#### DEC-010 — Unshipped schema evolution policy
+
+Accepted 2026-11-02: no AeroBrowser state directory existed on the development host when this was decided. The owner chose “Keep editing the unshipped v1 schema in place; dev databases are disposable and old ones are refused (current behaviour); real migrations start at the first release.” Storage changes for N16/N17/N18 edit `001_initial.sql` directly and keep `user_version = 1`; exact schema identity checks continue to refuse older development databases with SchemaMismatch rather than silently resetting, rewriting or deleting them. This supersedes the earlier handoff recommendation to build a preserving v1-to-v2 migration first. A shipped release must introduce versioned, preserving migrations before its schema changes again. No real user database is migrated, reset or deleted by this decision.
+
+#### DEC-011 — N16 deletion tombstone and hold semantics
+
+Accepted 2026-11-02: the owner chose “Tombstone keeps only the hashed task key, state and timestamps (no titles/content), kept forever to prevent ID reuse; once deletion starts, holds cannot stop it.” The tombstone stores the domain-separated task key, never the raw TaskId, title, contract or content. It survives the task's SQL cascade and permanently prevents reuse of that ID in the same state root. Holds are checked before the admission-closing `deleting` transition; afterwards deletion proceeds or retries to completion. A hashed key is pseudonymous, not anonymous: anyone who knows a candidate ID can confirm it was deleted. Local unlink is still not secure erasure or revocation of exported/remote copies.
 
 ## 5. Initial design hazards already covered by the plan
 

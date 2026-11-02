@@ -73,7 +73,11 @@ fn commit() -> CommitStep {
             sha256: "a".repeat(64),
         }],
         artifacts: vec![ArtifactRecord {
-            id: ArtifactId::from("artifact"),
+            id: ArtifactId::from(format!(
+                "a1-{}-{}",
+                crate::config::path_key(b"task", "task").unwrap(),
+                "0".repeat(32)
+            )),
             context: context(),
             sha256: "b".repeat(64),
             bytes: 10,
@@ -895,6 +899,14 @@ fn checkpoint_references_validate_evidence_and_artifact_payload_identity() {
                 ),
                 _ => format!("UPDATE {table} SET metadata_json='{{}}'"),
             };
+            if table == "artifacts" {
+                // Simulate corruption below the SQL immutability guard; the
+                // trigger itself is covered by the artifacts integration suite.
+                store
+                    .connection
+                    .execute("DROP TRIGGER immutable_artifact_record", [])
+                    .unwrap();
+            }
             store.connection.execute(&sql, []).unwrap();
             assert!(
                 matches!(

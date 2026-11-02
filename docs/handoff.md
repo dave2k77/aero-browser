@@ -1,6 +1,26 @@
 # AeroBrowser — implementation handoff
 
-Document-set revision: 2.15. Session stopped 2026-10-28 16:18 +08 at the owner's request. N05, N13, N16, N17 and N18 remain blocked as complete packages; each has partial foundations described below. The recommended next batch is a preserving schema-evolution design and implementation tested only on disposable databases, subject to the owner's go-ahead. Do not migrate, reset or delete real user data; do not stage, commit or push without separate explicit approval. Browser/runtime/native qualification remains unverified. Prior checkpoints below are historical where their next actions or test counts differ from this current checkpoint.
+Document-set revision: 2.16. Current checkpoint: chain batch CH-1 below (uncommitted, ready for review). Everything through 5af0e9d is committed and pushed. Prior checkpoints below are historical where their next actions or test counts differ.
+
+## Current chain batch CH-1 checkpoint
+
+Authorization (2026-11-02): the owner asked to resolve the blocked prerequisite chain (N05 ← N17/N18 + DEC-009; N17/N18 ← capture, N13, N16, schema). Decisions taken: DEC-009 accepted as no attestation; DEC-010 edit the unshipped v1 schema in place (no AeroBrowser state directory existed on the host, so no data is affected); DEC-011 minimal permanent tombstone, holds cannot stop a started deletion. Scope order: resolve all non-browser prerequisites in verified batches, then start C01–C04/D01 for real capture. The owner approved and the reviewed backlog was committed as seven per-package commits (each verified to build, test, lint and format on its own) and pushed: 0e7165b..5af0e9d.
+
+CH-1 — journal-backed artifact records (N18 slice), uncommitted:
+
+- `crates/aero-agent/src/artifacts.rs`: `StagedArtifact::record(context)`; `ArtifactStore::verify(&ArtifactRecord)` reads the file back against the journal record's task, length and SHA-256; shared `check_artifact_owner` for the `a1-<task key>-<nonce>` ID shape.
+- `crates/aero-agent/src/store/worker.rs`: commit attachments and checkpoint loads require store-generated IDs owned by the run's task (malformed → InvalidInput, other task → OwnershipMismatch, persisted mismatch → CorruptDatabase); new `JournalClient::load_artifact(task, id)`.
+- `crates/aero-agent/src/store/migrations/001_initial.sql` (in place per DEC-010): artifact rows cannot be updated, replaced or individually deleted; task cascade still removes them.
+- Tests: three new integration tests in `crates/aero-agent/tests/artifacts.rs`, each observed red (journal accepted `artifact`; lookup unimplemented; raw UPDATE succeeded) then green. Journal/worker fixtures now use well-formed owned IDs; the payload-corruption unit test drops the new trigger to simulate corruption below SQL.
+- Gates: `cargo test --workspace --locked --offline` 236 passed (223 behavior + 13 compile-fail doctests), 0 failed/ignored; warning-denied Clippy, fmt and warning-denied rustdoc pass. Not independently reviewed.
+
+Limits: readback proves byte identity with the record, not correctness, relevance, classification or export permission. Orphaned staged files and records whose file is missing are detected only per record; no inventory reconciliation yet. Existing development journals with the previous schema are refused by the exact-schema check (expected under DEC-010).
+
+Next batches (proposed, in order): CH-2 artifact reconciliation; CH-3 N17 sealed capture interface and evidence rows bound into the outcome transaction; CH-4 N13 retirement wired to journal cancellation; CH-5 N16 coordinated deletion with tombstone; CH-6 N05 atomic completion gate; then C01–C04/D01.
+
+## Previous checkpoint (2026-10-28 stop)
+
+Historical (revision 2.15): Session stopped 2026-10-28 16:18 +08 at the owner's request. N05, N13, N16, N17 and N18 remain blocked as complete packages; each has partial foundations described below. The recommended next batch is a preserving schema-evolution design and implementation tested only on disposable databases, subject to the owner's go-ahead. Do not migrate, reset or delete real user data; do not stage, commit or push without separate explicit approval. Browser/runtime/native qualification remains unverified. Prior checkpoints below are historical where their next actions or test counts differ from this current checkpoint.
 
 ## Next session: shared storage prerequisite
 

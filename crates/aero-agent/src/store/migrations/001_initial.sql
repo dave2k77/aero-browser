@@ -197,6 +197,14 @@ CREATE TABLE artifacts (
     created_at TEXT NOT NULL,
     FOREIGN KEY(session_id, task_id) REFERENCES sessions(id, task_id) ON DELETE CASCADE
 ) STRICT;
+CREATE TRIGGER immutable_artifact_record BEFORE UPDATE ON artifacts
+BEGIN SELECT RAISE(ABORT, 'artifact records are immutable'); END;
+CREATE TRIGGER no_artifact_delete BEFORE DELETE ON artifacts
+WHEN EXISTS(SELECT 1 FROM tasks WHERE id=OLD.task_id)
+BEGIN SELECT RAISE(ABORT, 'delete the owning task, not its artifact record'); END;
+CREATE TRIGGER no_artifact_replacement BEFORE INSERT ON artifacts
+WHEN EXISTS(SELECT 1 FROM artifacts WHERE id=NEW.id)
+BEGIN SELECT RAISE(ABORT, 'artifact record already exists'); END;
 CREATE TABLE criterion_results (
     task_id TEXT NOT NULL,
     contract_revision INTEGER NOT NULL,

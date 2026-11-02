@@ -512,6 +512,16 @@ fn proposal(context: RunContext) -> PrepareAction {
         },
     }
 }
+/// A well-formed store-generated artifact name owned by `task`, derived
+/// deterministically from a fixture label (`a1-<task key>-<32 hex nonce>`).
+fn artifact_id(task: &TaskId, label: &str) -> ArtifactId {
+    use sha2::{Digest, Sha256};
+    let mut key = Sha256::new();
+    key.update(b"aerobrowser-state-v1\0task\0");
+    key.update(task.as_str().as_bytes());
+    let nonce = format!("{:x}", Sha256::digest(label.as_bytes()));
+    ArtifactId::from(format!("a1-{:x}-{}", key.finalize(), &nonce[..32]))
+}
 fn commit(prepared: PreparedAction, artifact: &str) -> CommitStep {
     CommitStep {
         evidence: vec![EvidenceRecord {
@@ -524,7 +534,7 @@ fn commit(prepared: PreparedAction, artifact: &str) -> CommitStep {
             sha256: "a".repeat(64),
         }],
         artifacts: vec![ArtifactRecord {
-            id: ArtifactId::from(artifact),
+            id: artifact_id(&prepared.context.task_id, artifact),
             context: prepared.context.clone(),
             sha256: "b".repeat(64),
             bytes: 42,

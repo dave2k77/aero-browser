@@ -4,8 +4,16 @@ use aero_agent::{
     artifacts::{ArtifactPersistence, ArtifactStore, MAX_ARTIFACT_BYTES},
     config::StateConfig,
     store::StoreError,
+    store::worker::{
+        ArtifactRecord, CommitStep, Journal, PrepareAction, PreparedAction, Resources, StepOutcome,
+    },
+    tasks::TaskAuthority,
 };
-use aero_core::ids::TaskId;
+use aero_core::actions::{Action, Decision};
+use aero_core::checkpoint::RunContext;
+use aero_core::events::{DispatchState, VerificationStatus};
+use aero_core::ids::{ArtifactId, ObservationId, RunId, TaskId};
+use aero_core::task::{StartPrerequisites, TaskContract};
 use std::os::unix::fs::{PermissionsExt, symlink};
 
 fn private_tempdir() -> tempfile::TempDir {
@@ -163,4 +171,310 @@ fn refuses_symlink_artifact_directory() {
         ArtifactStore::open(&lease),
         Err(StoreError::UnsafePath)
     ));
+}
+
+fn contract(task: &str) -> TaskContract {
+    let plan = include_str!("../../../docs/implementation-plan.md");
+    let json = plan
+        .split("### 7.10 TaskContract")
+        .nth(1)
+        .unwrap()
+        .split("```json\n")
+        .nth(1)
+        .unwrap()
+        .split("\n```")
+        .next()
+        .unwrap();
+    let mut contract: TaskContract = serde_json::from_str(json).unwrap();
+    contract.task_id = TaskId::from(task);
+    contract
+}
+fn run(task: &str) -> RunContext {
+    RunContext {
+        task_id: TaskId::from(task),
+        run_id: RunId::from("run"),
+        contract_revision: 1,
+    }
+}
+fn prepare(journal: &Journal, context: &RunContext) -> PreparedAction {
+    journal
+        .client()
+        .prepare_action(PrepareAction {
+            context: context.clone(),
+            persistence: aero_agent::store::worker::Persistence::Redacted,
+            decision: Decision {
+                schema_version: 1,
+                observation_id: ObservationId::from("observation"),
+                rationale: "synthetic".into(),
+                action: Action::Wait { milliseconds: 1 },
+            },
+            reserve: Resources {
+                input_tokens: 10,
+                output_tokens: 5,
+                active_ms: 100,
+            },
+        })
+        .unwrap()
+        .blocking_recv()
+        .unwrap()
+}
+fn commit(prepared: PreparedAction, artifacts: Vec<ArtifactRecord>) -> CommitStep {
+    CommitStep {
+        prepared,
+        outcome: StepOutcome {
+            schema_version: 1,
+            dispatch: DispatchState::NotDispatched,
+            verification: VerificationStatus::Passed,
+        },
+        actual: Some(Resources {
+            input_tokens: 1,
+            output_tokens: 1,
+            active_ms: 1,
+        }),
+        evidence: vec![],
+        artifacts,
+    }
+}
+fn started(state: &aero_agent::config::PrivateState, task: &str) -> Journal {
+    let journal = Journal::start(state.journal_directory(), 8).unwrap();
+    let owner = TaskAuthority::new(&journal).trusted_user();
+    owner
+        .create_task(contract(task))
+        .unwrap()
+        .blocking_recv()
+        .unwrap();
+    owner
+        .start_run(
+            run(task),
+            StartPrerequisites {
+                local_processor_available: true,
+                background_service_available: false,
+            },
+        )
+        .unwrap()
+        .blocking_recv()
+        .unwrap();
+    journal
+}
+
+#[test]
+fn journal_artifact_records_must_name_task_staged_files() {
+    let home = private_tempdir();
+    let state = StateConfig::resolve(Some(home.path()), None)
+        .unwrap()
+        .open()
+        .unwrap();
+    let journal = started(&state, "owned");
+    let context = run("owned");
+    let prepared = prepare(&journal, &context);
+    let client = journal.client();
+    let other_lease = state.acquire_task(&TaskId::from("other")).unwrap();
+    let foreign = ArtifactStore::open(&other_lease)
+        .unwrap()
+        .stage(ArtifactPersistence::Public, b"other task")
+        .unwrap();
+    let staged_record = |id: &str| ArtifactRecord {
+        id: ArtifactId::from(id),
+        context: context.clone(),
+        sha256: "b".repeat(64),
+        bytes: 1,
+    };
+    for (record, expected) in [
+        (staged_record("artifact"), StoreError::InvalidInput),
+        (staged_record("../escape"), StoreError::InvalidInput),
+        (
+            staged_record(&format!("{}x", foreign.id().as_str())),
+            StoreError::InvalidInput,
+        ),
+        (
+            staged_record(foreign.id().as_str()),
+            StoreError::OwnershipMismatch,
+        ),
+        (
+            foreign.record(context.clone()),
+            StoreError::OwnershipMismatch,
+        ),
+    ] {
+        assert_eq!(
+            client
+                .commit_step(commit(prepared.clone(), vec![record]))
+                .unwrap()
+                .blocking_recv()
+                .err(),
+            Some(expected)
+        );
+    }
+    // Rejected attachments leave the action prepared; a real owned file commits.
+    let lease = state.acquire_task(&TaskId::from("owned")).unwrap();
+    let owned = ArtifactStore::open(&lease)
+        .unwrap()
+        .stage(ArtifactPersistence::Public, b"owned bytes")
+        .unwrap();
+    client
+        .commit_step(commit(prepared, vec![owned.record(context.clone())]))
+        .unwrap()
+        .blocking_recv()
+        .unwrap();
+    journal.close().unwrap();
+}
+
+#[test]
+fn committed_artifact_reads_back_against_its_journal_record() {
+    let home = private_tempdir();
+    let state = StateConfig::resolve(Some(home.path()), None)
+        .unwrap()
+        .open()
+        .unwrap();
+    let journal = started(&state, "owned");
+    let context = run("owned");
+    let lease = state.acquire_task(&TaskId::from("owned")).unwrap();
+    let store = ArtifactStore::open(&lease).unwrap();
+    let staged = store
+        .stage(ArtifactPersistence::Public, b"supplier,price\nacme,10\n")
+        .unwrap();
+    let missing = store
+        .stage(ArtifactPersistence::Public, b"later removed")
+        .unwrap();
+    let client = journal.client();
+    let prepared = prepare(&journal, &context);
+    client
+        .commit_step(commit(
+            prepared,
+            vec![
+                staged.record(context.clone()),
+                missing.record(context.clone()),
+            ],
+        ))
+        .unwrap()
+        .blocking_recv()
+        .unwrap();
+
+    let load = |id: &ArtifactId| {
+        client
+            .load_artifact(context.task_id.clone(), id.clone())
+            .unwrap()
+            .blocking_recv()
+    };
+    let record = load(staged.id()).unwrap();
+    assert_eq!(record.id, *staged.id());
+    assert!(record.context == context);
+    assert_eq!(record.sha256, staged.sha256());
+    assert_eq!(record.bytes, staged.len() as u64);
+    // Readback is checked against the durable journal record, not the receipt.
+    assert_eq!(store.verify(&record).unwrap(), b"supplier,price\nacme,10\n");
+    assert_eq!(
+        load(&ArtifactId::from("absent")).err(),
+        Some(StoreError::NotFound)
+    );
+    assert_eq!(
+        client
+            .load_artifact(TaskId::from("other"), staged.id().clone())
+            .unwrap()
+            .blocking_recv()
+            .err(),
+        Some(StoreError::NotFound)
+    );
+
+    // A journal record cannot vouch for different, absent or foreign bytes.
+    let mut forged = record.clone();
+    forged.sha256 = "0".repeat(64);
+    assert_eq!(store.verify(&forged).err(), Some(StoreError::Conflict));
+    let mut resized = record.clone();
+    resized.bytes += 1;
+    assert_eq!(store.verify(&resized).err(), Some(StoreError::Conflict));
+    let mut foreign = record.clone();
+    foreign.context = run("other");
+    assert_eq!(
+        store.verify(&foreign).err(),
+        Some(StoreError::OwnershipMismatch)
+    );
+    let path = lease.directory().join("artifacts");
+    std::fs::remove_file(path.join(missing.id().as_str())).unwrap();
+    let missing_record = load(missing.id()).unwrap();
+    assert_eq!(
+        store.verify(&missing_record).err(),
+        Some(StoreError::NotFound)
+    );
+    std::fs::write(
+        path.join(staged.id().as_str()),
+        b"supplier,price\nacme,99\n",
+    )
+    .unwrap();
+    assert_eq!(store.verify(&record).err(), Some(StoreError::Conflict));
+    journal.close().unwrap();
+}
+
+#[test]
+fn committed_artifact_records_are_immutable_and_corruption_is_refused() {
+    let home = private_tempdir();
+    let state = StateConfig::resolve(Some(home.path()), None)
+        .unwrap()
+        .open()
+        .unwrap();
+    let journal = started(&state, "owned");
+    let context = run("owned");
+    let lease = state.acquire_task(&TaskId::from("owned")).unwrap();
+    let staged = ArtifactStore::open(&lease)
+        .unwrap()
+        .stage(ArtifactPersistence::Public, b"bytes")
+        .unwrap();
+    let prepared = prepare(&journal, &context);
+    journal
+        .client()
+        .commit_step(commit(prepared, vec![staged.record(context.clone())]))
+        .unwrap()
+        .blocking_recv()
+        .unwrap();
+    journal.close().unwrap();
+
+    let sql =
+        rusqlite::Connection::open(state.journal_directory().join("journal.sqlite3")).unwrap();
+    let id = staged.id().as_str();
+    let forged = format!(
+        r#"{{"id":"{id}","context":{{"task_id":"owned","run_id":"run","contract_revision":1}},"sha256":"{}","bytes":5}}"#,
+        "0".repeat(64)
+    );
+    // Neither in-place update, replacement nor individual deletion may rewrite
+    // the record a later completion check reads back against.
+    assert!(
+        sql.execute(
+            "UPDATE artifacts SET metadata_json=?2 WHERE id=?1",
+            rusqlite::params![id, forged]
+        )
+        .is_err()
+    );
+    assert!(
+        sql.execute(
+            "INSERT OR REPLACE INTO artifacts VALUES (?1,'owned','run',?2,'now')",
+            rusqlite::params![id, forged]
+        )
+        .is_err()
+    );
+    assert!(
+        sql.execute("DELETE FROM artifacts WHERE id=?1", [id])
+            .is_err()
+    );
+    // A malformed or misattributed row is corruption, never a usable record.
+    let other = format!("a1-{}-{}", &id[3..67], "f".repeat(32));
+    let wrong_task = forged
+        .replace(id, &other)
+        .replace(r#""task_id":"owned""#, r#""task_id":"other""#);
+    sql.execute(
+        "INSERT INTO artifacts VALUES (?1,'owned','run',?2,'now')",
+        rusqlite::params![other, wrong_task],
+    )
+    .unwrap();
+    drop(sql);
+
+    let journal = Journal::start(state.journal_directory(), 8).unwrap();
+    let client = journal.client();
+    let load = |id: &str| {
+        client
+            .load_artifact(TaskId::from("owned"), ArtifactId::from(id))
+            .unwrap()
+            .blocking_recv()
+    };
+    assert_eq!(load(id).unwrap().sha256, staged.sha256());
+    assert_eq!(load(&other).err(), Some(StoreError::CorruptDatabase));
+    journal.close().unwrap();
 }

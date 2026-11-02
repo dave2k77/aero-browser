@@ -242,6 +242,18 @@ impl JournalClient {
         }
         self.submit(move |s| s.load_audit(context, after_step, limit))
     }
+    /// Trusted host lookup of one committed artifact record for a task. The
+    /// record is metadata only: use `ArtifactStore::verify` to read back the
+    /// actual bytes before relying on it. Unknown or other-task IDs are NotFound.
+    pub fn load_artifact(
+        &self,
+        task_id: TaskId,
+        id: ArtifactId,
+    ) -> Result<Reply<ArtifactRecord>, StoreError> {
+        identifier(task_id.as_str())?;
+        identifier(id.as_str())?;
+        self.submit(move |s| load_artifact(&s.connection, &task_id, &id))
+    }
     /// Deletes SQL-owned records only, not files/profiles/derived stores (N16).
     /// This operation does not acquire the task lease or stop an existing writer.
     /// It is not safe to expose as complete task deletion or a retention purge:
@@ -398,6 +410,7 @@ impl CommitStep {
                 .validate_for(&self.prepared.context)
                 .map_err(|_| StoreError::OwnershipMismatch)?;
             identifier(r.id.as_str())?;
+            crate::artifacts::check_artifact_owner(&r.context.task_id, r.id.as_str())?;
             digest(&r.sha256)?;
             if r.bytes > MAX_COUNTER || !seen.insert(r.id.as_str()) {
                 return Err(StoreError::InvalidInput);
@@ -1145,7 +1158,9 @@ fn read_checkpoint(
                 (record.id.as_str().to_owned(), record.context, record.sha256)
             } else {
                 let record: ArtifactRecord = decode(&json)?;
-                if record.bytes > MAX_COUNTER {
+                if record.bytes > MAX_COUNTER
+                    || crate::artifacts::check_artifact_owner(&context.task_id, id).is_err()
+                {
                     return Err(StoreError::CorruptDatabase);
                 }
                 (record.id.as_str().to_owned(), record.context, record.sha256)
@@ -1157,6 +1172,30 @@ fn read_checkpoint(
         }
     }
     Ok(Some(cp))
+}
+fn load_artifact(
+    c: &Connection,
+    task_id: &TaskId,
+    id: &ArtifactId,
+) -> Result<ArtifactRecord, StoreError> {
+    let json: String = sql(c
+        .query_row(
+            "SELECT substr(metadata_json,1,?3) FROM artifacts WHERE id=?1 AND task_id=?2",
+            params![id.as_str(), task_id.as_str(), READ_LIMIT],
+            |r| r.get(0),
+        )
+        .optional())?
+    .ok_or(StoreError::NotFound)?;
+    let record: ArtifactRecord = decode(&json)?;
+    digest(&record.sha256).map_err(|_| StoreError::CorruptDatabase)?;
+    if record.id != *id
+        || record.context.task_id != *task_id
+        || record.bytes > MAX_COUNTER
+        || crate::artifacts::check_artifact_owner(task_id, id.as_str()).is_err()
+    {
+        return Err(StoreError::CorruptDatabase);
+    }
+    Ok(record)
 }
 fn apply_commit(
     c: &Connection,

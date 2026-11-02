@@ -5,9 +5,11 @@
 //! the cooperative lock alive. As with config, a malicious same-UID/root process
 //! is outside the threat model. Failed creates/writes are never cleaned up here.
 
-use crate::config::{TaskLease, TaskOwner};
+use crate::config::{TaskLease, TaskOwner, path_key};
 use crate::store::StoreError;
-use aero_core::ids::ArtifactId;
+use crate::store::worker::ArtifactRecord;
+use aero_core::checkpoint::RunContext;
+use aero_core::ids::{ArtifactId, TaskId};
 use sha2::{Digest, Sha256};
 use std::ffi::CString;
 use std::fs::File;
@@ -51,6 +53,15 @@ impl StagedArtifact {
     }
     pub fn sha256(&self) -> &str {
         &self.sha256
+    }
+    /// Journal attachment describing these read-back bytes for one run.
+    pub fn record(&self, context: RunContext) -> ArtifactRecord {
+        ArtifactRecord {
+            id: self.id.clone(),
+            context,
+            sha256: self.sha256.clone(),
+            bytes: self.length as u64,
+        }
     }
 }
 
@@ -106,11 +117,32 @@ impl ArtifactStore {
         Ok(receipt)
     }
 
+    /// Read back the bytes a durable journal record describes. The record must
+    /// belong to this store's task, and the actual file must match its recorded
+    /// length and SHA-256. This proves byte identity with the record, not that
+    /// the bytes are correct, relevant, classified or exportable.
+    pub fn verify(&self, record: &ArtifactRecord) -> Result<Vec<u8>, StoreError> {
+        if path_key(b"task", record.context.task_id.as_str())? != self.task_key {
+            return Err(StoreError::OwnershipMismatch);
+        }
+        let length = usize::try_from(record.bytes).map_err(|_| StoreError::BudgetExceeded)?;
+        self.read_checked(&record.id, length, &record.sha256)
+    }
+
     /// Reopen without following links, validate the private file, bound the read,
     /// and compare the actual length and SHA-256 with the staging receipt.
     pub fn readback(&self, receipt: &StagedArtifact) -> Result<Vec<u8>, StoreError> {
-        let name = self.checked_name(receipt.id.as_str())?;
-        if receipt.length > MAX_ARTIFACT_BYTES {
+        self.read_checked(&receipt.id, receipt.length, &receipt.sha256)
+    }
+
+    fn read_checked(
+        &self,
+        id: &ArtifactId,
+        length: usize,
+        sha256: &str,
+    ) -> Result<Vec<u8>, StoreError> {
+        let name = self.checked_name(id.as_str())?;
+        if length > MAX_ARTIFACT_BYTES {
             return Err(StoreError::BudgetExceeded);
         }
         // SAFETY: valid single component, owned directory fd, no-follow and
@@ -134,19 +166,17 @@ impl ArtifactStore {
         if metadata.len() > MAX_ARTIFACT_BYTES as u64 {
             return Err(StoreError::BudgetExceeded);
         }
-        if metadata.len() != receipt.length as u64 {
+        if metadata.len() != length as u64 {
             return Err(StoreError::Conflict);
         }
-        let mut bytes = Vec::with_capacity(receipt.length);
+        let mut bytes = Vec::with_capacity(length);
         file.take((MAX_ARTIFACT_BYTES as u64) + 1)
             .read_to_end(&mut bytes)
             .map_err(|_| StoreError::Io)?;
         if bytes.len() > MAX_ARTIFACT_BYTES {
             return Err(StoreError::BudgetExceeded);
         }
-        if bytes.len() != receipt.length
-            || format!("{:x}", Sha256::digest(&bytes)) != receipt.sha256
-        {
+        if bytes.len() != length || format!("{:x}", Sha256::digest(&bytes)) != sha256 {
             return Err(StoreError::Conflict);
         }
         Ok(bytes)
@@ -154,18 +184,7 @@ impl ArtifactStore {
 
     fn checked_name(&self, id: &str) -> Result<CString, StoreError> {
         // No arbitrary filenames, separators, NULs, normalization, or cross-task IDs.
-        let Some((prefix, nonce)) = id.strip_prefix("a1-").and_then(|v| v.split_once('-')) else {
-            return Err(StoreError::UnsafePath);
-        };
-        if prefix.len() != 64
-            || nonce.len() != 32
-            || !prefix
-                .bytes()
-                .chain(nonce.bytes())
-                .all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c))
-        {
-            return Err(StoreError::UnsafePath);
-        }
+        let prefix = artifact_task_key(id).ok_or(StoreError::UnsafePath)?;
         if prefix != self.task_key {
             return Err(StoreError::OwnershipMismatch);
         }
@@ -204,6 +223,29 @@ impl ArtifactStore {
         validate_file(&file)?;
         Ok(file)
     }
+}
+
+/// The task key embedded in a well-formed generated artifact ID
+/// (`a1-<64 hex task key>-<32 hex nonce>`), or None for any other string.
+fn artifact_task_key(id: &str) -> Option<&str> {
+    let (prefix, nonce) = id.strip_prefix("a1-")?.split_once('-')?;
+    let hex = |v: &str| {
+        v.bytes()
+            .all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c))
+    };
+    (prefix.len() == 64 && nonce.len() == 32 && hex(prefix) && hex(nonce)).then_some(prefix)
+}
+
+/// Journal attachment check: an artifact ID must be a generated store name
+/// owned by the attaching task. Malformed IDs are invalid input; another
+/// task's well-formed ID is an ownership mismatch. Existence and byte identity
+/// are established separately by [`ArtifactStore::verify`].
+pub(crate) fn check_artifact_owner(task: &TaskId, id: &str) -> Result<(), StoreError> {
+    let prefix = artifact_task_key(id).ok_or(StoreError::InvalidInput)?;
+    if prefix != path_key(b"task", task.as_str())? {
+        return Err(StoreError::OwnershipMismatch);
+    }
+    Ok(())
 }
 
 fn validate_file(file: &File) -> Result<std::fs::Metadata, StoreError> {
