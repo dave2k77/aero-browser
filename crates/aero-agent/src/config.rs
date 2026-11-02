@@ -118,10 +118,14 @@ pub struct TaskLease {
     owner: Arc<TaskOwner>,
 }
 impl TaskLease {
-    /// Open the private artifact directory relative to the owned task descriptor.
-    /// The returned owner guard keeps the task lock alive with the directory.
-    pub(crate) fn artifact_directory(&self) -> Result<(File, String, Arc<TaskOwner>), StoreError> {
-        let directory = private_child_directory(&self.owner.directory, "artifacts", false)?;
+    /// Open a private store subdirectory (e.g. "artifacts", "evidence")
+    /// relative to the owned task descriptor. The returned owner guard keeps
+    /// the task lock alive with the directory.
+    pub(crate) fn task_subdirectory(
+        &self,
+        name: &'static str,
+    ) -> Result<(File, String, Arc<TaskOwner>), StoreError> {
+        let directory = private_child_directory(&self.owner.directory, name, false)?;
         Ok((directory, self.owner.key.clone(), Arc::clone(&self.owner)))
     }
 

@@ -189,6 +189,14 @@ CREATE TABLE evidence (
     created_at TEXT NOT NULL,
     FOREIGN KEY(session_id, task_id) REFERENCES sessions(id, task_id) ON DELETE CASCADE
 ) STRICT;
+CREATE TRIGGER immutable_evidence_record BEFORE UPDATE ON evidence
+BEGIN SELECT RAISE(ABORT, 'evidence records are immutable'); END;
+CREATE TRIGGER no_evidence_delete BEFORE DELETE ON evidence
+WHEN EXISTS(SELECT 1 FROM tasks WHERE id=OLD.task_id)
+BEGIN SELECT RAISE(ABORT, 'delete the owning task, not its evidence record'); END;
+CREATE TRIGGER no_evidence_replacement BEFORE INSERT ON evidence
+WHEN EXISTS(SELECT 1 FROM evidence WHERE id=NEW.id)
+BEGIN SELECT RAISE(ABORT, 'evidence record already exists'); END;
 CREATE TABLE artifacts (
     id TEXT PRIMARY KEY NOT NULL CHECK(length(id) > 0),
     task_id TEXT NOT NULL,

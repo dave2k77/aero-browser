@@ -97,15 +97,28 @@ impl ArtifactReconciliation {
 pub struct ArtifactStore {
     directory: File,
     task_key: String,
+    // Generated-name namespace: "a1-" artifacts, "e1-" evidence captures.
+    prefix: &'static str,
     // Drop the directory before the lock-owning guard.
     _owner: Arc<TaskOwner>,
 }
 impl ArtifactStore {
     pub fn open(lease: &TaskLease) -> Result<Self, StoreError> {
-        let (directory, task_key, owner) = lease.artifact_directory()?;
+        Self::open_namespace(lease, "artifacts", ARTIFACT_PREFIX)
+    }
+
+    /// The same private store in another task-owned subdirectory and name
+    /// namespace (used for evidence captures).
+    pub(crate) fn open_namespace(
+        lease: &TaskLease,
+        subdirectory: &'static str,
+        prefix: &'static str,
+    ) -> Result<Self, StoreError> {
+        let (directory, task_key, owner) = lease.task_subdirectory(subdirectory)?;
         Ok(Self {
             directory,
             task_key,
+            prefix,
             _owner: owner,
         })
     }
@@ -117,19 +130,39 @@ impl ArtifactStore {
         policy: ArtifactPersistence,
         bytes: &[u8],
     ) -> Result<StagedArtifact, StoreError> {
+        let id = self.new_id(policy)?;
+        self.write_new(id, bytes)
+    }
+
+    /// Like [`Self::stage`], but the content is built from the generated name
+    /// (an evidence capture embeds its own ID).
+    pub(crate) fn stage_with(
+        &self,
+        policy: ArtifactPersistence,
+        build: impl FnOnce(&str) -> Result<Vec<u8>, StoreError>,
+    ) -> Result<StagedArtifact, StoreError> {
+        let id = self.new_id(policy)?;
+        let bytes = build(&id)?;
+        self.write_new(id, &bytes)
+    }
+
+    fn new_id(&self, policy: ArtifactPersistence) -> Result<String, StoreError> {
         if matches!(
             policy,
             ArtifactPersistence::Unknown | ArtifactPersistence::Sensitive
         ) {
             return Err(StoreError::EncryptionRequired);
         }
-        if bytes.len() > MAX_ARTIFACT_BYTES {
-            return Err(StoreError::BudgetExceeded);
-        }
         let mut random = [0u8; 16];
         fill_random(&mut random)?;
         let nonce: String = random.iter().map(|b| format!("{b:02x}")).collect();
-        let id = format!("a1-{}-{nonce}", self.task_key);
+        Ok(format!("{}{}-{nonce}", self.prefix, self.task_key))
+    }
+
+    fn write_new(&self, id: String, bytes: &[u8]) -> Result<StagedArtifact, StoreError> {
+        if bytes.len() > MAX_ARTIFACT_BYTES {
+            return Err(StoreError::BudgetExceeded);
+        }
         let mut file = self.create_exclusive(&id)?;
         file.write_all(bytes).map_err(|_| StoreError::Io)?;
         file.sync_all().map_err(|_| StoreError::Io)?;
@@ -155,7 +188,7 @@ impl ArtifactStore {
             return Err(StoreError::OwnershipMismatch);
         }
         let length = usize::try_from(record.bytes).map_err(|_| StoreError::BudgetExceeded)?;
-        self.read_checked(&record.id, length, &record.sha256)
+        self.read_checked(record.id.as_str(), length, &record.sha256)
     }
 
     /// Compare `records` (from `JournalClient::load_artifacts`) with the files
@@ -174,7 +207,7 @@ impl ArtifactStore {
         let mut recorded = std::collections::HashSet::new();
         for record in records {
             if path_key(b"task", record.context.task_id.as_str())? != self.task_key
-                || artifact_task_key(record.id.as_str()).ok_or(StoreError::InvalidInput)?
+                || blob_task_key(self.prefix, record.id.as_str()).ok_or(StoreError::InvalidInput)?
                     != self.task_key
             {
                 return Err(StoreError::OwnershipMismatch);
@@ -200,7 +233,9 @@ impl ArtifactStore {
             // file_type does not follow symlinks.
             let regular = entry.file_type().map_err(|_| StoreError::Io)?.is_file();
             match name {
-                Some(n) if regular && artifact_task_key(n) == Some(self.task_key.as_str()) => {
+                Some(n)
+                    if regular && blob_task_key(self.prefix, n) == Some(self.task_key.as_str()) =>
+                {
                     report.unrecorded.push(ArtifactId::from(n))
                 }
                 _ => report.unexpected_entries += 1,
@@ -230,16 +265,16 @@ impl ArtifactStore {
     /// Reopen without following links, validate the private file, bound the read,
     /// and compare the actual length and SHA-256 with the staging receipt.
     pub fn readback(&self, receipt: &StagedArtifact) -> Result<Vec<u8>, StoreError> {
-        self.read_checked(&receipt.id, receipt.length, &receipt.sha256)
+        self.read_checked(receipt.id.as_str(), receipt.length, &receipt.sha256)
     }
 
-    fn read_checked(
+    pub(crate) fn read_checked(
         &self,
-        id: &ArtifactId,
+        id: &str,
         length: usize,
         sha256: &str,
     ) -> Result<Vec<u8>, StoreError> {
-        let name = self.checked_name(id.as_str())?;
+        let name = self.checked_name(id)?;
         if length > MAX_ARTIFACT_BYTES {
             return Err(StoreError::BudgetExceeded);
         }
@@ -282,7 +317,7 @@ impl ArtifactStore {
 
     fn checked_name(&self, id: &str) -> Result<CString, StoreError> {
         // No arbitrary filenames, separators, NULs, normalization, or cross-task IDs.
-        let prefix = artifact_task_key(id).ok_or(StoreError::UnsafePath)?;
+        let prefix = blob_task_key(self.prefix, id).ok_or(StoreError::UnsafePath)?;
         if prefix != self.task_key {
             return Err(StoreError::OwnershipMismatch);
         }
@@ -323,10 +358,13 @@ impl ArtifactStore {
     }
 }
 
-/// The task key embedded in a well-formed generated artifact ID
-/// (`a1-<64 hex task key>-<32 hex nonce>`), or None for any other string.
-fn artifact_task_key(id: &str) -> Option<&str> {
-    let (prefix, nonce) = id.strip_prefix("a1-")?.split_once('-')?;
+pub(crate) const ARTIFACT_PREFIX: &str = "a1-";
+pub(crate) const EVIDENCE_PREFIX: &str = "e1-";
+
+/// The task key embedded in a well-formed generated name in one namespace
+/// (`<prefix><64 hex task key>-<32 hex nonce>`), or None for any other string.
+fn blob_task_key<'a>(namespace: &str, id: &'a str) -> Option<&'a str> {
+    let (prefix, nonce) = id.strip_prefix(namespace)?.split_once('-')?;
     let hex = |v: &str| {
         v.bytes()
             .all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c))
@@ -339,7 +377,16 @@ fn artifact_task_key(id: &str) -> Option<&str> {
 /// task's well-formed ID is an ownership mismatch. Existence and byte identity
 /// are established separately by [`ArtifactStore::verify`].
 pub(crate) fn check_artifact_owner(task: &TaskId, id: &str) -> Result<(), StoreError> {
-    let prefix = artifact_task_key(id).ok_or(StoreError::InvalidInput)?;
+    check_owner(ARTIFACT_PREFIX, task, id)
+}
+
+/// The evidence-capture equivalent of [`check_artifact_owner`].
+pub(crate) fn check_evidence_owner(task: &TaskId, id: &str) -> Result<(), StoreError> {
+    check_owner(EVIDENCE_PREFIX, task, id)
+}
+
+fn check_owner(namespace: &str, task: &TaskId, id: &str) -> Result<(), StoreError> {
+    let prefix = blob_task_key(namespace, id).ok_or(StoreError::InvalidInput)?;
     if prefix != path_key(b"task", task.as_str())? {
         return Err(StoreError::OwnershipMismatch);
     }

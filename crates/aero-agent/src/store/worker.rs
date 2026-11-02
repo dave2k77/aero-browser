@@ -258,6 +258,18 @@ impl JournalClient {
         identifier(id.as_str())?;
         self.submit(move |s| load_artifact(&s.connection, &task_id, &id))
     }
+    /// Trusted host lookup of one committed evidence record for a task. The
+    /// record is metadata only: use `EvidenceStore::load` to read back and
+    /// decode the captured fact. Unknown or other-task IDs are NotFound.
+    pub fn load_evidence(
+        &self,
+        task_id: TaskId,
+        id: EvidenceId,
+    ) -> Result<Reply<EvidenceRecord>, StoreError> {
+        identifier(task_id.as_str())?;
+        identifier(id.as_str())?;
+        self.submit(move |s| load_evidence(&s.connection, &task_id, &id))
+    }
     /// Trusted host inventory of every committed artifact record for a task,
     /// ordered by ID, for reconciliation with `ArtifactStore::reconcile`. More
     /// than [`MAX_ARTIFACT_INVENTORY`] records is BudgetExceeded rather than a
@@ -342,6 +354,7 @@ pub struct EvidenceRecord {
     pub id: EvidenceId,
     pub context: RunContext,
     pub sha256: String,
+    pub bytes: u64,
 }
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -414,8 +427,9 @@ impl CommitStep {
                 .validate_for(&self.prepared.context)
                 .map_err(|_| StoreError::OwnershipMismatch)?;
             identifier(r.id.as_str())?;
+            crate::artifacts::check_evidence_owner(&r.context.task_id, r.id.as_str())?;
             digest(&r.sha256)?;
-            if !seen.insert(r.id.as_str()) {
+            if r.bytes > MAX_COUNTER || !seen.insert(r.id.as_str()) {
                 return Err(StoreError::InvalidInput);
             }
         }
@@ -1170,6 +1184,11 @@ fn read_checkpoint(
             let json:String=sql(c.query_row(&format!("SELECT substr(metadata_json,1,?4) FROM {table} WHERE id=?1 AND task_id=?2 AND session_id=?3"),params![id,context.task_id.as_str(),context.run_id.as_str(),READ_LIMIT],|r|r.get(0)).optional())?.ok_or(StoreError::CorruptDatabase)?;
             let (record_id, record_context, sha256) = if table == "evidence" {
                 let record: EvidenceRecord = decode(&json)?;
+                if record.bytes > MAX_COUNTER
+                    || crate::artifacts::check_evidence_owner(&context.task_id, id).is_err()
+                {
+                    return Err(StoreError::CorruptDatabase);
+                }
                 (record.id.as_str().to_owned(), record.context, record.sha256)
             } else {
                 let record: ArtifactRecord = decode(&json)?;
@@ -1202,6 +1221,30 @@ fn load_artifact(
         .optional())?
     .ok_or(StoreError::NotFound)?;
     checked_artifact(&json, task_id, id)
+}
+fn load_evidence(
+    c: &Connection,
+    task_id: &TaskId,
+    id: &EvidenceId,
+) -> Result<EvidenceRecord, StoreError> {
+    let json: String = sql(c
+        .query_row(
+            "SELECT substr(metadata_json,1,?3) FROM evidence WHERE id=?1 AND task_id=?2",
+            params![id.as_str(), task_id.as_str(), ARTIFACT_ROW_LIMIT],
+            |r| r.get(0),
+        )
+        .optional())?
+    .ok_or(StoreError::NotFound)?;
+    let record: EvidenceRecord = decode(&json)?;
+    digest(&record.sha256).map_err(|_| StoreError::CorruptDatabase)?;
+    if record.id != *id
+        || record.context.task_id != *task_id
+        || record.bytes > MAX_COUNTER
+        || crate::artifacts::check_evidence_owner(task_id, id.as_str()).is_err()
+    {
+        return Err(StoreError::CorruptDatabase);
+    }
+    Ok(record)
 }
 fn load_artifacts(c: &Connection, task_id: &TaskId) -> Result<Vec<ArtifactRecord>, StoreError> {
     let mut statement = sql(c.prepare(

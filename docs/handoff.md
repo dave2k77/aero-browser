@@ -1,8 +1,25 @@
 # AeroBrowser — implementation handoff
 
-Document-set revision: 2.17. Current checkpoint: chain batch CH-2 below (uncommitted, ready for review). Everything through c2aa4a2 (CH-1) is committed and pushed. Prior checkpoints below are historical where their next actions or test counts differ.
+Document-set revision: 2.18. Current checkpoint: chain batch CH-3 below (uncommitted, ready for review). Everything through 3a9c3ce (CH-2) is committed and pushed. Prior checkpoints below are historical where their next actions or test counts differ.
 
-## Current chain batch CH-2 checkpoint
+## Current chain batch CH-3 checkpoint
+
+CH-2 was approved, committed as 3a9c3ce and pushed (remote main read back at the same SHA). The owner then said “yes, go ahead” to CH-3.
+
+CH-3 — durable evidence capture (N17 slice), uncommitted:
+
+- `crates/aero-agent/src/artifacts.rs`: the store now has a name namespace and subdirectory (`open_namespace`), `stage_with` for content built from the generated name, `check_evidence_owner`; artifact behaviour is unchanged. `crates/aero-agent/src/config.rs`: `artifact_directory` generalised to `task_subdirectory(name)`.
+- `crates/aero-agent/src/evidence.rs`: `FactCapture`, `EvidenceStore::{open, capture, load}`, `StagedEvidence::record`. Capture validates the same bounds the comparison uses (scoped URL, nonempty excerpt, bounded text, nonzero time), refuses Unknown/Sensitive (no encryption yet), and writes strict versioned JSON embedding the generated `e1-` ID and run context. Load reads back against the journal record, requires an object, exact version/ID, and the record's run context (else OwnershipMismatch).
+- `crates/aero-agent/src/store/worker.rs`: `EvidenceRecord` gains `bytes`; commit attachments and checkpoint loads require task-owned `e1-` IDs; new `JournalClient::load_evidence(task, id)`. Evidence is inserted inside the existing outcome transaction, so it commits atomically with the step.
+- Schema (DEC-010, in place): evidence rows refuse update, replacement and individual deletion.
+- Tests in `crates/aero-agent/tests/evidence.rs`: `journal_evidence_records_must_name_task_captures` observed red (fake ID accepted), then red again at the raw UPDATE, then green after the triggers; `captured_facts_round_trip_through_the_journal_and_store` was written together with the implementation, so it is not red/green evidence. Journal/worker fixtures now use well-formed `e1-` IDs with a byte length; the payload-corruption unit test drops the matching trigger to simulate corruption below SQL.
+- Gates: workspace 240 passed (227 behavior + 13 compile-fail doctests), 0 failed/ignored; warning-denied Clippy, fmt and warning-denied rustdoc pass. Not independently reviewed.
+
+Limits: nothing yet produces captures from a real authorized observation (needs D01); Public/Redacted are trusted host assertions; the existing caller-constructible `CapturedFact` comparison remains for synthetic use and must not be fed caller facts by N05, which must load facts through `load_evidence` + `EvidenceStore::load`. No evidence reconciliation (orphaned captures) yet.
+
+Next: CH-4 N13 gateway retirement wired to journal task cancellation.
+
+## Previous chain batch CH-2 checkpoint (committed 3a9c3ce)
 
 CH-1 was approved, committed as c2aa4a2 and pushed (remote main read back at the same SHA). The owner then said “yes, go ahead” to CH-2.
 
@@ -17,7 +34,7 @@ Limits: the report is a snapshot; run it under the task lease while nothing is s
 
 Next: CH-3 N17 sealed capture interface and evidence rows bound into the outcome transaction.
 
-## Previous chain batch CH-1 checkpoint (committed c2aa4a2)
+### Earlier: chain batch CH-1 checkpoint (committed c2aa4a2)
 
 Authorization (2026-11-02): the owner asked to resolve the blocked prerequisite chain (N05 ← N17/N18 + DEC-009; N17/N18 ← capture, N13, N16, schema). Decisions taken: DEC-009 accepted as no attestation; DEC-010 edit the unshipped v1 schema in place (no AeroBrowser state directory existed on the host, so no data is affected); DEC-011 minimal permanent tombstone, holds cannot stop a started deletion. Scope order: resolve all non-browser prerequisites in verified batches, then start C01–C04/D01 for real capture. The owner approved and the reviewed backlog was committed as seven per-package commits (each verified to build, test, lint and format on its own) and pushed: 0e7165b..5af0e9d.
 

@@ -514,6 +514,7 @@ fn proposal(context: RunContext) -> PrepareAction {
 }
 /// A well-formed store-generated artifact name owned by `task`, derived
 /// deterministically from a fixture label (`a1-<task key>-<32 hex nonce>`).
+/// Evidence fixtures use the same shape in the `e1-` namespace.
 fn artifact_id(task: &TaskId, label: &str) -> ArtifactId {
     use sha2::{Digest, Sha256};
     let mut key = Sha256::new();
@@ -525,13 +526,21 @@ fn artifact_id(task: &TaskId, label: &str) -> ArtifactId {
 fn commit(prepared: PreparedAction, artifact: &str) -> CommitStep {
     CommitStep {
         evidence: vec![EvidenceRecord {
-            id: EvidenceId::from(format!(
-                "evidence-{}-{}",
-                prepared.context.run_id.as_str(),
-                prepared.step
-            )),
+            id: EvidenceId::from(
+                artifact_id(
+                    &prepared.context.task_id,
+                    &format!(
+                        "evidence-{}-{}",
+                        prepared.context.run_id.as_str(),
+                        prepared.step
+                    ),
+                )
+                .as_str()
+                .replacen("a1-", "e1-", 1),
+            ),
             context: prepared.context.clone(),
             sha256: "a".repeat(64),
+            bytes: 1,
         }],
         artifacts: vec![ArtifactRecord {
             id: artifact_id(&prepared.context.task_id, artifact),
