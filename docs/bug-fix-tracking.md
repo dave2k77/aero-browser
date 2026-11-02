@@ -169,6 +169,7 @@ The pre-N01 audit reproduced/fixed BUG-001 and three additional CLI issues below
 | DEC-009 | P0 | accepted | Project owner | No attestation for now: only machine-verified criteria can complete a task; subjective criteria stay inconclusive/needs_review | Full N05 completion gate and transition |
 | DEC-010 | P0 | accepted | Project owner | Unshipped v1 journal schema is edited in place; development databases are disposable and older ones are refused; preserving migrations start at the first release | N16/N17/N18 storage changes |
 | DEC-011 | P0 | accepted | Project owner | Deletion tombstone keeps only the hashed task key, state and timestamps, permanently; holds cannot stop a deletion once it has started | N16 durable coordinated deletion |
+| DEC-012 | P1 | pending | Project owner | Confirm or revise the report claims format implemented as the default in CH-7 (one `aero-claims` JSON block per Markdown report; null evidence = unknown) | Agent report generation (E-series) and the G1 workflow |
 
 #### DEC-001 — Development setup authorization
 
@@ -219,6 +220,10 @@ Accepted 2026-11-02: no AeroBrowser state directory existed on the development h
 #### DEC-011 — N16 deletion tombstone and hold semantics
 
 Accepted 2026-11-02: the owner chose “Tombstone keeps only the hashed task key, state and timestamps (no titles/content), kept forever to prevent ID reuse; once deletion starts, holds cannot stop it.” The tombstone stores the domain-separated task key, never the raw TaskId, title, contract or content. It survives the task's SQL cascade and permanently prevents reuse of that ID in the same state root. Holds are checked before the admission-closing `deleting` transition; afterwards deletion proceeds or retries to completion. A hashed key is pseudonymous, not anonymous: anyone who knows a candidate ID can confirm it was deleted. Local unlink is still not secure erasure or revocation of exported/remote copies.
+
+#### DEC-012 — Report claims and evidence citation format
+
+Pending owner confirmation. The specification requires report fields/claims to link to captured evidence and unsupported assertions to be marked unknown, but defines no format. CH-7 implements a conservative default so evidence coverage can be machine-checked: a Markdown report output carries exactly one fenced block with info string `aero-claims` containing strict JSON `{"schema_version":1,"claims":[{"entity","field","value","evidence_id"}]}`, where `evidence_id` is a committed capture of the same run or `null` for an explicit unknown. The completion gate loads each cited capture itself and requires exact entity/field/value agreement; any contradicted claim fails, otherwise the matched share must reach the contract's `required_fraction`. Prose outside the block is not verified. Revising this format is cheap while nothing generates reports yet; it must be settled before E-series report generation and the G1 workflow.
 
 ## 5. Initial design hazards already covered by the plan
 

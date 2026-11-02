@@ -2,7 +2,8 @@
 //! suites spawn child processes that can inherit journal lock descriptors.
 
 use aero_agent::artifacts::{ArtifactPersistence, ArtifactStore};
-use aero_agent::config::{PrivateState, StateConfig};
+use aero_agent::config::{PrivateState, StateConfig, TaskLease};
+use aero_agent::evidence::{EvidenceStore, FactCapture};
 use aero_agent::store::StoreError;
 use aero_agent::store::worker::{
     CommitStep, Journal, PrepareAction, PreparedAction, Resources, StepOutcome,
@@ -12,7 +13,7 @@ use aero_agent::verification::{CompletionReport, OutputBinding};
 use aero_core::actions::{Action, Decision};
 use aero_core::checkpoint::{RunContext, RunStatus};
 use aero_core::events::{DispatchState, VerificationStatus};
-use aero_core::ids::{ArtifactId, ObservationId, RunId, TaskId};
+use aero_core::ids::{ArtifactId, DocumentEpoch, EvidenceId, ObservationId, RunId, TaskId};
 use aero_core::task::{Criterion, StartPrerequisites, TaskContract};
 use std::os::unix::fs::PermissionsExt;
 
@@ -149,6 +150,57 @@ impl Fixture {
             .unwrap();
         staged.id().clone()
     }
+    /// Capture `(entity, field, value)` facts and commit them with one step.
+    fn capture(
+        &self,
+        lease: &TaskLease,
+        context: &RunContext,
+        facts: &[(&str, &str, &str)],
+    ) -> Vec<EvidenceId> {
+        let store = EvidenceStore::open(lease).unwrap();
+        let staged: Vec<_> = facts
+            .iter()
+            .map(|(entity, field, value)| {
+                store
+                    .capture(
+                        ArtifactPersistence::Public,
+                        context,
+                        FactCapture {
+                            document: DocumentEpoch::from("catalog-1"),
+                            origin: "https://supplier.test".into(),
+                            effective_url: "https://supplier.test/catalog".into(),
+                            captured_at_ms: 1,
+                            entity: (*entity).into(),
+                            field: (*field).into(),
+                            value: (*value).into(),
+                            excerpt: format!("{entity} {field}: {value}"),
+                        },
+                    )
+                    .unwrap()
+            })
+            .collect();
+        self.journal
+            .client()
+            .commit_step(CommitStep {
+                prepared: self.prepare(context),
+                outcome: StepOutcome {
+                    schema_version: 1,
+                    dispatch: DispatchState::NotDispatched,
+                    verification: VerificationStatus::Passed,
+                },
+                actual: Some(Resources {
+                    input_tokens: 1,
+                    output_tokens: 1,
+                    active_ms: 1,
+                }),
+                evidence: staged.iter().map(|e| e.record(context.clone())).collect(),
+                artifacts: vec![],
+            })
+            .unwrap()
+            .blocking_recv()
+            .unwrap();
+        staged.iter().map(|e| e.id().clone()).collect()
+    }
     fn status(&self, context: &RunContext) -> RunStatus {
         self.journal
             .client()
@@ -185,7 +237,7 @@ fn all_required_criteria_verified_completes_the_run_once() {
 
     let report = f
         .authority
-        .complete_run(&store, context.clone(), bind(&artifact))
+        .complete_run(&lease, context.clone(), bind(&artifact))
         .unwrap();
     assert!(report.completed);
     assert_eq!(
@@ -225,7 +277,7 @@ fn all_required_criteria_verified_completes_the_run_once() {
     ));
     assert_eq!(
         f.authority
-            .complete_run(&store, context.clone(), bind(&artifact))
+            .complete_run(&lease, context.clone(), bind(&artifact))
             .err(),
         Some(StoreError::Conflict)
     );
@@ -269,7 +321,7 @@ fn failed_or_unverifiable_criteria_leave_the_run_open() {
     );
     let report = f
         .authority
-        .complete_run(&store, context.clone(), bind(&one_row))
+        .complete_run(&lease, context.clone(), bind(&one_row))
         .unwrap();
     assert!(!report.completed);
     assert_eq!(
@@ -302,7 +354,7 @@ fn failed_or_unverifiable_criteria_leave_the_run_open() {
     ] {
         let report = f
             .authority
-            .complete_run(&store, context.clone(), bind(artifact))
+            .complete_run(&lease, context.clone(), bind(artifact))
             .unwrap();
         assert!(!report.completed);
         assert_eq!(
@@ -318,7 +370,7 @@ fn failed_or_unverifiable_criteria_leave_the_run_open() {
     // No binding for the required output: unavailable, not complete.
     let report = f
         .authority
-        .complete_run(&store, context.clone(), vec![])
+        .complete_run(&lease, context.clone(), vec![])
         .unwrap();
     assert!(!report.completed);
     assert!(
@@ -340,7 +392,7 @@ fn failed_or_unverifiable_criteria_leave_the_run_open() {
     ] {
         assert!(
             f.authority
-                .complete_run(&store, context.clone(), bad)
+                .complete_run(&lease, context.clone(), bad)
                 .is_err()
         );
     }
@@ -350,7 +402,7 @@ fn failed_or_unverifiable_criteria_leave_the_run_open() {
     let good = f.produce(&store, &context, GOOD_CSV);
     assert!(
         f.authority
-            .complete_run(&store, context.clone(), bind(&good))
+            .complete_run(&lease, context.clone(), bind(&good))
             .unwrap()
             .completed
     );
@@ -361,8 +413,8 @@ fn failed_or_unverifiable_criteria_leave_the_run_open() {
 
 #[test]
 fn unsupported_required_criteria_never_complete() {
-    // DEC-009: only machine-verified criteria complete. Evidence coverage is
-    // not machine-checkable yet, so the full documented fixture cannot pass.
+    // DEC-009: only machine-verified criteria complete. A report without a
+    // structured claims block cannot be checked for evidence coverage.
     let f = Fixture::new(fixture_contract("task", 1));
     let context = run("task", "run", 1);
     let lease = f.state.acquire_task(&TaskId::from("task")).unwrap();
@@ -372,7 +424,7 @@ fn unsupported_required_criteria_never_complete() {
     let report = f
         .authority
         .complete_run(
-            &store,
+            &lease,
             context.clone(),
             vec![
                 OutputBinding {
@@ -416,7 +468,7 @@ fn unresolved_work_or_a_superseded_run_or_revision_blocks_completion() {
     let pending = f.prepare(&context);
     assert!(
         f.authority
-            .complete_run(&store, context.clone(), bind(&artifact))
+            .complete_run(&lease, context.clone(), bind(&artifact))
             .is_err()
     );
     f.journal
@@ -449,7 +501,7 @@ fn unresolved_work_or_a_superseded_run_or_revision_blocks_completion() {
         .unwrap();
     assert_eq!(
         f.authority
-            .complete_run(&store, context.clone(), bind(&artifact))
+            .complete_run(&lease, context.clone(), bind(&artifact))
             .err(),
         Some(StoreError::Conflict)
     );
@@ -463,7 +515,7 @@ fn unresolved_work_or_a_superseded_run_or_revision_blocks_completion() {
         .unwrap();
     assert_eq!(
         f.authority
-            .complete_run(&store, newer.clone(), bind(&newer_artifact))
+            .complete_run(&lease, newer.clone(), bind(&newer_artifact))
             .err(),
         Some(StoreError::Conflict)
     );
@@ -476,11 +528,331 @@ fn unresolved_work_or_a_superseded_run_or_revision_blocks_completion() {
         .unwrap();
     assert_eq!(
         f.authority
-            .complete_run(&store, current.clone(), bind(&newer_artifact))
+            .complete_run(&lease, current.clone(), bind(&newer_artifact))
             .err(),
         Some(StoreError::OwnershipMismatch)
     );
     assert_eq!(f.status(&current), RunStatus::Paused);
+    drop(store);
+    drop(lease);
+    f.journal.close().unwrap();
+}
+
+/// A Markdown report whose structured claims block is `claims_json`.
+fn report(claims_json: &str) -> Vec<u8> {
+    format!("# Suppliers\n\nAcme and Bolt prices.\n\n```aero-claims\n{claims_json}\n```\n")
+        .into_bytes()
+}
+fn claim(entity: &str, value: &str, evidence: Option<&EvidenceId>) -> String {
+    let evidence = evidence.map_or("null".to_owned(), |e| format!("\"{}\"", e.as_str()));
+    format!(r#"{{"entity":"{entity}","field":"price","value":"{value}","evidence_id":{evidence}}}"#)
+}
+fn claims(items: &[String]) -> String {
+    format!(r#"{{"schema_version":1,"claims":[{}]}}"#, items.join(","))
+}
+fn both(csv: &ArtifactId, report: &ArtifactId) -> Vec<OutputBinding> {
+    let mut bindings = bind(csv);
+    bindings.push(OutputBinding {
+        output: "supplier-report".into(),
+        artifact: report.clone(),
+    });
+    bindings
+}
+fn coverage(report: &CompletionReport) -> VerificationStatus {
+    report
+        .results
+        .iter()
+        .find(|r| r.criterion_id == "source-coverage")
+        .unwrap()
+        .status
+}
+
+#[test]
+fn evidence_coverage_passes_with_matching_owned_captures() {
+    let f = Fixture::new(fixture_contract("task", 1));
+    let context = run("task", "run", 1);
+    let lease = f.state.acquire_task(&TaskId::from("task")).unwrap();
+    let store = ArtifactStore::open(&lease).unwrap();
+    let ids = f.capture(
+        &lease,
+        &context,
+        &[("acme", "price", "10"), ("bolt", "price", "12")],
+    );
+    let csv = f.produce(&store, &context, GOOD_CSV);
+    let md = f.produce(
+        &store,
+        &context,
+        &report(&claims(&[
+            claim("acme", "10", Some(&ids[0])),
+            claim("bolt", "12", Some(&ids[1])),
+        ])),
+    );
+    let result = f
+        .authority
+        .complete_run(&lease, context.clone(), both(&csv, &md))
+        .unwrap();
+    assert!(result.completed);
+    let source = result
+        .results
+        .iter()
+        .find(|r| r.criterion_id == "source-coverage")
+        .unwrap();
+    assert_eq!(source.status, VerificationStatus::Passed);
+    let mut cited = source.evidence_ids.clone();
+    cited.sort_by(|a, b| a.as_str().cmp(b.as_str()));
+    let mut expected = ids.clone();
+    expected.sort_by(|a, b| a.as_str().cmp(b.as_str()));
+    assert_eq!(cited, expected);
+    assert_eq!(f.status(&context), RunStatus::Completed);
+    drop(store);
+    drop(lease);
+    f.journal.close().unwrap();
+}
+
+#[test]
+fn evidence_coverage_rejects_unknown_contradicted_foreign_or_malformed_claims() {
+    let f = Fixture::new(fixture_contract("task", 1));
+    let context = run("task", "run", 1);
+    // Another task's committed capture must not count for this task.
+    let owner = f.authority.trusted_user();
+    owner
+        .create_task(fixture_contract("other", 1))
+        .unwrap()
+        .blocking_recv()
+        .unwrap();
+    let other = run("other", "run", 1);
+    owner
+        .start_run(other.clone(), prerequisites())
+        .unwrap()
+        .blocking_recv()
+        .unwrap();
+    let other_lease = f.state.acquire_task(&TaskId::from("other")).unwrap();
+    let foreign = f.capture(&other_lease, &other, &[("acme", "price", "10")]);
+    drop(other_lease);
+
+    let lease = f.state.acquire_task(&TaskId::from("task")).unwrap();
+    let store = ArtifactStore::open(&lease).unwrap();
+    let ids = f.capture(
+        &lease,
+        &context,
+        &[("acme", "price", "10"), ("bolt", "price", "12")],
+    );
+    let csv = f.produce(&store, &context, GOOD_CSV);
+    let acme = claim("acme", "10", Some(&ids[0]));
+    let bolt = claim("bolt", "12", Some(&ids[1]));
+    let cases: Vec<(&str, Vec<u8>, VerificationStatus)> = vec![
+        (
+            "contradicted value",
+            report(&claims(&[claim("acme", "11", Some(&ids[0])), bolt.clone()])),
+            VerificationStatus::Failed,
+        ),
+        (
+            "unknown claim below required fraction",
+            report(&claims(&[acme.clone(), claim("bolt", "12", None)])),
+            VerificationStatus::Failed,
+        ),
+        (
+            "cites another entity's capture",
+            report(&claims(&[acme.clone(), claim("bolt", "12", Some(&ids[0]))])),
+            VerificationStatus::Failed,
+        ),
+        (
+            "cites another task's capture",
+            report(&claims(&[
+                claim("acme", "10", Some(&foreign[0])),
+                bolt.clone(),
+            ])),
+            VerificationStatus::Failed,
+        ),
+        (
+            "cites a nonexistent capture",
+            report(&claims(&[
+                acme.clone(),
+                claim("bolt", "12", Some(&EvidenceId::from("e1-missing"))),
+            ])),
+            VerificationStatus::Failed,
+        ),
+        (
+            "no claims block",
+            b"# Suppliers\n\nAcme 10, Bolt 12.\n".to_vec(),
+            VerificationStatus::Inconclusive,
+        ),
+        (
+            "empty claims",
+            report(&claims(&[])),
+            VerificationStatus::Inconclusive,
+        ),
+        (
+            "array root",
+            report(&format!("[{acme}]")),
+            VerificationStatus::Inconclusive,
+        ),
+        (
+            "unknown key",
+            report(&format!(
+                r#"{{"schema_version":1,"claims":[{acme}],"extra":1}}"#
+            )),
+            VerificationStatus::Inconclusive,
+        ),
+        (
+            "duplicate key",
+            report(&format!(
+                r#"{{"schema_version":1,"schema_version":1,"claims":[{acme}]}}"#
+            )),
+            VerificationStatus::Inconclusive,
+        ),
+        (
+            "positional claim",
+            report(r#"{"schema_version":1,"claims":[["acme","price","10",null]]}"#),
+            VerificationStatus::Inconclusive,
+        ),
+        (
+            "unsupported version",
+            report(&format!(r#"{{"schema_version":2,"claims":[{acme}]}}"#)),
+            VerificationStatus::Inconclusive,
+        ),
+        (
+            "two claims blocks",
+            [
+                report(&claims(std::slice::from_ref(&acme))),
+                report(&claims(std::slice::from_ref(&bolt))),
+            ]
+            .concat(),
+            VerificationStatus::Inconclusive,
+        ),
+    ];
+    for (name, bytes, expected) in cases {
+        let md = f.produce(&store, &context, &bytes);
+        let result = f
+            .authority
+            .complete_run(&lease, context.clone(), both(&csv, &md))
+            .unwrap();
+        assert!(!result.completed, "{name}");
+        assert_eq!(coverage(&result), expected, "{name}");
+    }
+    assert_eq!(f.status(&context), RunStatus::Paused);
+    // The run stayed open: a fully supported report completes it.
+    let md = f.produce(&store, &context, &report(&claims(&[acme, bolt])));
+    assert!(
+        f.authority
+            .complete_run(&lease, context.clone(), both(&csv, &md))
+            .unwrap()
+            .completed
+    );
+    drop(store);
+    drop(lease);
+    f.journal.close().unwrap();
+}
+
+#[test]
+fn coverage_fraction_counts_unknowns_but_a_contradiction_always_fails() {
+    let mut c = fixture_contract("task", 1);
+    for criterion in &mut c.criteria {
+        if let Criterion::EvidenceCoverage {
+            required_fraction, ..
+        } = criterion
+        {
+            *required_fraction = aero_core::task::CoverageFraction::new(0.5).unwrap();
+        }
+    }
+    let f = Fixture::new(c);
+    let context = run("task", "run", 1);
+    let lease = f.state.acquire_task(&TaskId::from("task")).unwrap();
+    let store = ArtifactStore::open(&lease).unwrap();
+    let ids = f.capture(
+        &lease,
+        &context,
+        &[("acme", "price", "10"), ("bolt", "price", "12")],
+    );
+    let csv = f.produce(&store, &context, GOOD_CSV);
+    // Half matched, half contradicted: the fraction is met but it still fails.
+    let md = f.produce(
+        &store,
+        &context,
+        &report(&claims(&[
+            claim("acme", "10", Some(&ids[0])),
+            claim("bolt", "99", Some(&ids[1])),
+        ])),
+    );
+    let result = f
+        .authority
+        .complete_run(&lease, context.clone(), both(&csv, &md))
+        .unwrap();
+    assert!(!result.completed);
+    assert_eq!(coverage(&result), VerificationStatus::Failed);
+    // Half matched, half explicitly unknown: meets 0.5 and completes.
+    let md = f.produce(
+        &store,
+        &context,
+        &report(&claims(&[
+            claim("acme", "10", Some(&ids[0])),
+            claim("bolt", "12", None),
+        ])),
+    );
+    assert!(
+        f.authority
+            .complete_run(&lease, context.clone(), both(&csv, &md))
+            .unwrap()
+            .completed
+    );
+    drop(store);
+    drop(lease);
+    f.journal.close().unwrap();
+}
+
+#[test]
+fn captures_from_another_run_do_not_count() {
+    let f = Fixture::new(fixture_contract("task", 1));
+    let first = run("task", "run", 1);
+    let lease = f.state.acquire_task(&TaskId::from("task")).unwrap();
+    let old = f.capture(
+        &lease,
+        &first,
+        &[("acme", "price", "10"), ("bolt", "price", "12")],
+    );
+    let current = run("task", "second", 1);
+    f.authority
+        .trusted_user()
+        .start_run(current.clone(), prerequisites())
+        .unwrap()
+        .blocking_recv()
+        .unwrap();
+    let store = ArtifactStore::open(&lease).unwrap();
+    let csv = f.produce(&store, &current, GOOD_CSV);
+    let stale = f.produce(
+        &store,
+        &current,
+        &report(&claims(&[
+            claim("acme", "10", Some(&old[0])),
+            claim("bolt", "12", Some(&old[1])),
+        ])),
+    );
+    let result = f
+        .authority
+        .complete_run(&lease, current.clone(), both(&csv, &stale))
+        .unwrap();
+    assert!(!result.completed);
+    assert_eq!(coverage(&result), VerificationStatus::Failed);
+    // Fresh captures in the current run complete it.
+    let fresh = f.capture(
+        &lease,
+        &current,
+        &[("acme", "price", "10"), ("bolt", "price", "12")],
+    );
+    let md = f.produce(
+        &store,
+        &current,
+        &report(&claims(&[
+            claim("acme", "10", Some(&fresh[0])),
+            claim("bolt", "12", Some(&fresh[1])),
+        ])),
+    );
+    assert!(
+        f.authority
+            .complete_run(&lease, current.clone(), both(&csv, &md))
+            .unwrap()
+            .completed
+    );
     drop(store);
     drop(lease);
     f.journal.close().unwrap();

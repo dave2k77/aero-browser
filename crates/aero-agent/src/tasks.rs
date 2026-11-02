@@ -122,7 +122,8 @@ impl TaskAuthority {
     /// immutable journal record and evaluates the accepted contract's criteria
     /// itself, then the journal rechecks run, revision, unresolved work, budget
     /// and record identity atomically with recording results and completing.
-    /// `store` must be this task's open artifact store. Blocking (host thread).
+    /// `lease` must be this task's lease; both its artifact and evidence stores
+    /// are read. Blocking (host thread).
     ///
     /// `completed` is false when any required criterion is not Passed or a
     /// required output is unbound or failed readback; the run stays open.
@@ -130,7 +131,7 @@ impl TaskAuthority {
     /// coverage, non-CSV checks) are Inconclusive and block completion.
     pub fn complete_run(
         &self,
-        store: &crate::artifacts::ArtifactStore,
+        lease: &crate::config::TaskLease,
         context: RunContext,
         outputs: Vec<crate::verification::OutputBinding>,
     ) -> Result<crate::verification::CompletionReport, StoreError> {
@@ -144,7 +145,7 @@ impl TaskAuthority {
         let evaluation = crate::verification::evaluate(
             &resume.contract,
             &context,
-            store,
+            lease,
             &self.journal,
             outputs,
         )?;

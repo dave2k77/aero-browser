@@ -1,8 +1,23 @@
 # AeroBrowser — implementation handoff
 
-Document-set revision: 2.21. Current checkpoint: chain batch CH-6 below (uncommitted, ready for review). Everything through 71ed9d4 (CH-5) is committed and pushed. Prior checkpoints below are historical where their next actions or test counts differ.
+Document-set revision: 2.22. Current checkpoint: chain batch CH-7 below (uncommitted, ready for review). Everything through 960f50a (CH-6) is committed and pushed. Prior checkpoints below are historical where their next actions or test counts differ.
 
-## Current chain batch CH-6 checkpoint
+## Current chain batch CH-7 checkpoint
+
+CH-6 was approved, committed as 960f50a and pushed (remote main read back at the same SHA). The owner then said “yes, go ahead” to CH-7.
+
+CH-7 — evidence coverage in the completion gate (N05/N17), uncommitted:
+
+- Format: DEC-012 (pending owner confirmation) — one fenced `aero-claims` block of strict JSON in a Markdown report; `evidence_id: null` marks an explicit unknown. The parser requires exactly one block, an object root with object claims (no positional arrays), no unknown/missing/duplicate fields, and schema version 1.
+- `crates/aero-agent/src/verification/completion.rs`: `EvidenceCoverage` on Markdown outputs; the gate loads every distinct cited capture itself (committed record of this task and run, read back and decoded by `EvidenceStore::load`), compares each claim with `assess_structured_claim` (exact entity/field/value, conflicting captures inconclusive), fails on any contradiction, else Passed iff matched/total ≥ `required_fraction`; matched evidence IDs are recorded in the criterion result. Coverage on non-Markdown outputs remains Unsupported. `crates/aero-agent/src/tasks.rs`: `complete_run` now takes `&TaskLease` (opens both stores).
+- Tests in `crates/aero-agent/tests/completion.rs`: two observed red (coverage Inconclusive) then green — matching captures complete the full documented fixture; contradicted, unknown, wrong-entity, other-task, nonexistent, missing/empty/malformed/duplicated blocks do not, and a correct report later completes. Two more added after a mutation pass: a 0.5 fraction where a contradiction still fails but an unknown is tolerated, and captures from an earlier run do not count. Seven coverage mutants: all caught; removing the gate's own same-run check alone survives because `assess_structured_claim` independently rejects other-run captures (confirmed by removing both).
+- Gates: workspace 256 passed (243 behavior + 13 compile-fail doctests), 0 failed/ignored; warning-denied Clippy, fmt and warning-denied rustdoc pass. Not independently reviewed.
+
+Limits: prose outside the claims block is unchecked; coverage proves cited captures say the same values, not that sources are true or relevant beyond the exact entity/field; captures still have no real browser producer (D01). DEC-012 should be confirmed before report generation is built.
+
+Chain status: all non-browser prerequisites for N05 now exist (artifact records and reconciliation, evidence capture, gateway lifecycle, coordinated deletion, completion gate with coverage). Next: C01–C04/D01 browser runtime for real capture, as agreed.
+
+## Previous chain batch CH-6 checkpoint (committed 960f50a)
 
 CH-5 was approved, committed as 71ed9d4 and pushed (remote main read back at the same SHA). The owner then said “yes, go ahead” to CH-6.
 
@@ -19,7 +34,7 @@ Limits: passing proves byte shape, not truth or sourcing. The documented G1 fixt
 
 Next: CH-7 evidence coverage (claim/citation format, per-claim comparison), then C01–C04/D01 browser runtime for real capture.
 
-## Previous chain batch CH-5 checkpoint (committed 71ed9d4)
+### Earlier: chain batch CH-5 checkpoint (committed 71ed9d4)
 
 CH-4 was approved, committed as fa09ba9 and pushed (remote main read back at the same SHA). The owner then said “yes, go ahead” to CH-5.
 
