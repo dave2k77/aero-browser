@@ -1,5 +1,6 @@
 //! C03: the Bubblewrap launch command is constructed purely and checked as
-//! data. No browser or Bubblewrap process is started here (C04 does that).
+//! data. C04: the `browser` module (feature `browser-tests`) launches the
+//! pinned Chromium from `AERO_CHROMIUM`; everything else starts no process.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
@@ -562,5 +563,370 @@ fn display_modes_expose_only_their_socket() {
             ),
             "{display:?}"
         );
+    }
+}
+
+// ---- C04: host probe and launch preconditions (no process started) ---------
+
+#[test]
+fn host_probe_reports_this_hosts_runtime() {
+    let probed = HostLayout::probe();
+    assert_eq!(
+        probed.entries.get(&PathBuf::from("/usr")),
+        Some(&HostEntry::Directory)
+    );
+    // Independent check of every candidate path against lstat.
+    let candidates = std::iter::once("/usr")
+        .chain(aero_cdp::launcher::MERGED_USR_PATHS.iter().copied())
+        .chain(aero_cdp::launcher::ETC_RUNTIME_PATHS.iter().copied());
+    for path in candidates {
+        let expected = std::fs::symlink_metadata(path).ok().map(|meta| {
+            if meta.file_type().is_symlink() {
+                HostEntry::Symlink(std::fs::read_link(path).unwrap())
+            } else if meta.is_dir() {
+                HostEntry::Directory
+            } else {
+                HostEntry::File
+            }
+        });
+        assert_eq!(
+            probed.entries.get(&PathBuf::from(path)),
+            expected.as_ref(),
+            "{path}"
+        );
+    }
+    assert_eq!(
+        probed.entries.len(),
+        probed
+            .entries
+            .keys()
+            .filter(|k| std::fs::symlink_metadata(k).is_ok())
+            .count()
+    );
+}
+
+#[tokio::test]
+async fn stale_devtools_port_file_is_refused_before_spawning() {
+    use aero_cdp::runtime::{BrowserProcess, LaunchError, LaunchLimits};
+    let run = tempfile::tempdir().unwrap();
+    for child in ["profile", "staging"] {
+        std::fs::create_dir(run.path().join(child)).unwrap();
+    }
+    let stale = run.path().join("profile/DevToolsActivePort");
+    std::fs::write(&stale, b"1\n/devtools/browser/old").unwrap();
+    let mut r = request();
+    // A Bubblewrap that does not exist: reaching spawn would report Spawn.
+    r.bwrap = "/nonexistent/bwrap".into();
+    r.browser_executable = "/usr/bin/true".into();
+    r.run_directory = run.path().to_owned();
+    let spec = SandboxSpec::build(&r).unwrap();
+    let result = BrowserProcess::launch(&spec, LaunchLimits::default()).await;
+    assert_eq!(result.err(), Some(LaunchError::StaleProfile));
+    assert_eq!(
+        std::fs::read(&stale).unwrap(),
+        b"1\n/devtools/browser/old",
+        "the stale file is reported, not deleted"
+    );
+}
+
+// ---- C04: real browser launch (feature `browser-tests`) --------------------
+
+#[cfg(feature = "browser-tests")]
+mod browser {
+    use super::*;
+    use aero_cdp::CdpConnection;
+    use aero_cdp::TransportLimits;
+    use aero_cdp::runtime::{BrowserProcess, LaunchError, LaunchLimits};
+    use aero_core::ids::CdpSessionId;
+    use serde_json::{Value, json};
+    use std::os::unix::fs::PermissionsExt;
+    use std::time::Duration;
+
+    const CALL: Duration = Duration::from_secs(10);
+    /// Browser tests share one host process table; run them one at a time.
+    static SERIAL: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+    /// The pinned browser, or `None` to skip (a failure when required).
+    fn chromium() -> Option<PathBuf> {
+        let required = std::env::var("AERO_REQUIRE_BROWSER").as_deref() == Ok("1");
+        let found = std::env::var_os("AERO_CHROMIUM")
+            .map(PathBuf::from)
+            .and_then(|path| std::fs::canonicalize(path).ok());
+        if found.is_none() {
+            assert!(
+                !required,
+                "AERO_REQUIRE_BROWSER=1 but AERO_CHROMIUM is unset or missing"
+            );
+            eprintln!("skipping: set AERO_CHROMIUM to the pinned Chromium executable");
+        }
+        found
+    }
+
+    struct Run {
+        directory: tempfile::TempDir,
+        spec: SandboxSpec,
+    }
+
+    fn prepare(browser: &std::path::Path) -> Run {
+        let directory = tempfile::tempdir().unwrap();
+        for child in ["profile", "staging"] {
+            let path = directory.path().join(child);
+            std::fs::create_dir(&path).unwrap();
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700)).unwrap();
+        }
+        let bwrap = std::env::var_os("AERO_BWRAP").unwrap_or_else(|| "/usr/bin/bwrap".into());
+        let spec = SandboxSpec::build(&SandboxRequest {
+            bwrap: std::fs::canonicalize(bwrap).expect("Bubblewrap is installed"),
+            browser_executable: browser.to_owned(),
+            run_directory: directory.path().to_owned(),
+            host: HostLayout::probe(),
+            display: Display::Headless,
+            viewport: Viewport {
+                width: 1280,
+                height: 800,
+            },
+            locale: "C.UTF-8".into(),
+        })
+        .unwrap();
+        Run { directory, spec }
+    }
+
+    /// Host PIDs of processes executing from the sandbox browser directory.
+    fn sandbox_processes() -> Vec<(u32, String)> {
+        let mut found = Vec::new();
+        for entry in std::fs::read_dir("/proc").unwrap().flatten() {
+            let Ok(pid) = entry.file_name().to_string_lossy().parse::<u32>() else {
+                continue;
+            };
+            let Ok(raw) = std::fs::read(entry.path().join("cmdline")) else {
+                continue;
+            };
+            let command = String::from_utf8_lossy(&raw).replace('\0', " ");
+            if command.starts_with("/opt/aero/browser/") {
+                found.push((pid, command));
+            }
+        }
+        found
+    }
+
+    fn status_field(pid: u32, field: &str) -> Option<String> {
+        let status = std::fs::read_to_string(format!("/proc/{pid}/status")).ok()?;
+        status
+            .lines()
+            .find_map(|line| line.strip_prefix(field)?.strip_prefix(':'))
+            .map(|value| value.trim().to_owned())
+    }
+
+    async fn shutdown(browser: BrowserProcess) -> aero_cdp::runtime::ShutdownReport {
+        tokio::task::spawn_blocking(move || browser.shutdown())
+            .await
+            .unwrap()
+    }
+
+    /// Open `url` in a new page and return its text once `ready` accepts it
+    /// (or the last text seen after ten seconds).
+    async fn page_text(connection: &CdpConnection, url: &str, ready: fn(&str) -> bool) -> String {
+        let target = connection
+            .call("Target.createTarget", json!({ "url": url }), None, CALL)
+            .await
+            .unwrap();
+        let attached = connection
+            .call(
+                "Target.attachToTarget",
+                json!({ "targetId": target["targetId"], "flatten": true }),
+                None,
+                CALL,
+            )
+            .await
+            .unwrap();
+        let session = CdpSessionId::from(attached["sessionId"].as_str().unwrap());
+        let mut last = String::new();
+        for _ in 0..100 {
+            let reply = connection
+                .call(
+                    "Runtime.evaluate",
+                    json!({
+                        "expression": "document.readyState === 'complete' && document.body ? document.body.innerText : ''",
+                        "returnByValue": true
+                    }),
+                    Some(&session),
+                    CALL,
+                )
+                .await;
+            if let Ok(Value::String(text)) = reply.map(|r| r["result"]["value"].clone()) {
+                if ready(&text) {
+                    return text;
+                }
+                last = text;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        last
+    }
+
+    #[tokio::test]
+    async fn launch_reaches_cdp() {
+        let Some(chrome) = chromium() else { return };
+        let _serial = SERIAL.lock().await;
+        let run = prepare(&chrome);
+        let browser = BrowserProcess::launch(&run.spec, LaunchLimits::default())
+            .await
+            .expect("browser becomes ready");
+        assert!(browser.endpoint().starts_with("ws://127.0.0.1:"));
+        assert!(browser.endpoint().contains("/devtools/browser/"));
+        assert!(run.spec.devtools_active_port().is_file());
+        let connection = CdpConnection::connect(browser.endpoint(), TransportLimits::default())
+            .await
+            .unwrap();
+        let version = connection
+            .call("Browser.getVersion", json!({}), None, CALL)
+            .await
+            .unwrap();
+        assert!(
+            version["product"].as_str().unwrap().contains("Chrome/156."),
+            "{version}"
+        );
+        assert!(!sandbox_processes().is_empty());
+        connection.close().await;
+
+        let report = shutdown(browser).await;
+        assert!(report.sandbox_emptied, "{report:?}");
+        assert!(report.status.is_some());
+        assert_eq!(sandbox_processes(), vec![], "no sandbox process survives");
+        drop(run.directory);
+    }
+
+    #[tokio::test]
+    async fn readiness_failure_reaps_child() {
+        let Some(chrome) = chromium() else { return };
+        let _serial = SERIAL.lock().await;
+
+        // Deadline too short for Chromium to write its port file.
+        let run = prepare(&chrome);
+        let limits = LaunchLimits {
+            readiness_timeout: Duration::from_millis(1),
+            ..LaunchLimits::default()
+        };
+        let result = BrowserProcess::launch(&run.spec, limits).await;
+        assert!(
+            matches!(result, Err(LaunchError::ReadinessTimeout { .. })),
+            "{:?}",
+            result.err()
+        );
+        assert_eq!(sandbox_processes(), vec![], "timed-out sandbox was reaped");
+
+        // A "browser" that exits at once reports its status and stderr.
+        let early = prepare(std::path::Path::new("/usr/bin/sleep"));
+        match BrowserProcess::launch(&early.spec, LaunchLimits::default()).await {
+            Err(LaunchError::EarlyExit { code, stderr, .. }) => {
+                assert_eq!(code, Some(1));
+                assert!(stderr.contains("sleep"), "{stderr}");
+            }
+            other => panic!("expected an early exit, got {:?}", other.err()),
+        }
+        assert_eq!(sandbox_processes(), vec![]);
+    }
+
+    #[tokio::test]
+    async fn sandbox_cannot_read_host_canary() {
+        let Some(chrome) = chromium() else { return };
+        let _serial = SERIAL.lock().await;
+        let nonce = format!(
+            "{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+        // Synthetic canary outside every mount (not a real secret).
+        let outside = tempfile::tempdir().unwrap();
+        let canary = outside.path().join("canary.txt");
+        std::fs::write(&canary, format!("aero-canary-{nonce}")).unwrap();
+        let run = prepare(&chrome);
+        // Positive control: a file in the run's staging mount is readable.
+        std::fs::write(
+            run.directory.path().join("staging/control.txt"),
+            format!("aero-control-{nonce}"),
+        )
+        .unwrap();
+        let browser = BrowserProcess::launch(&run.spec, LaunchLimits::default())
+            .await
+            .unwrap();
+        let connection = CdpConnection::connect(browser.endpoint(), TransportLimits::default())
+            .await
+            .unwrap();
+
+        let control = page_text(&connection, "file:///home/aero/staging/control.txt", |t| {
+            t.contains("aero-control-")
+        })
+        .await;
+        assert!(
+            control.contains(&format!("aero-control-{nonce}")),
+            "{control}"
+        );
+        let leaked = page_text(&connection, &format!("file://{}", canary.display()), |t| {
+            !t.is_empty()
+        })
+        .await;
+        assert!(!leaked.is_empty(), "the canary navigation produced no page");
+        assert!(!leaked.contains("aero-canary-"), "host canary was readable");
+        let listing = page_text(
+            &connection,
+            &format!("file://{}/", outside.path().display()),
+            |t| !t.is_empty(),
+        )
+        .await;
+        assert!(
+            !listing.contains("canary.txt"),
+            "host directory was listable"
+        );
+
+        connection.close().await;
+        assert!(shutdown(browser).await.sandbox_emptied);
+    }
+
+    #[tokio::test]
+    async fn renderer_sandbox_remains_enabled() {
+        let Some(chrome) = chromium() else { return };
+        let _serial = SERIAL.lock().await;
+        let run = prepare(&chrome);
+        let browser = BrowserProcess::launch(&run.spec, LaunchLimits::default())
+            .await
+            .unwrap();
+        let connection = CdpConnection::connect(browser.endpoint(), TransportLimits::default())
+            .await
+            .unwrap();
+        // Chromium's own report.
+        let report = page_text(&connection, "chrome://sandbox", |t| t.contains("sandboxed")).await;
+        assert!(report.contains("You are adequately sandboxed"), "{report}");
+
+        // Independent evidence from the host: every renderer is seccomp-
+        // filtered and in a PID namespace nested below the browser's.
+        let processes = sandbox_processes();
+        let browser_ns = processes
+            .iter()
+            .find(|(_, command)| command.contains("--remote-debugging-port=0"))
+            .map(|(pid, _)| std::fs::read_link(format!("/proc/{pid}/ns/pid")).unwrap())
+            .expect("main browser process");
+        let renderers: Vec<u32> = processes
+            .iter()
+            .filter(|(_, command)| command.contains("--type=renderer"))
+            .map(|(pid, _)| *pid)
+            .collect();
+        assert!(!renderers.is_empty(), "{processes:?}");
+        for pid in renderers {
+            assert_eq!(
+                status_field(pid, "Seccomp").as_deref(),
+                Some("2"),
+                "renderer {pid}"
+            );
+            assert_ne!(
+                std::fs::read_link(format!("/proc/{pid}/ns/pid")).unwrap(),
+                browser_ns,
+                "renderer {pid} shares the browser's PID namespace"
+            );
+        }
+        connection.close().await;
+        assert!(shutdown(browser).await.sandbox_emptied);
     }
 }

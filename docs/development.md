@@ -52,6 +52,18 @@ No provider, external database server, keyring, desktop GUI, model download, rea
 
 `cargo test -p aero-cdp --test sandbox --locked` runs five pure tests of `SandboxSpec::build`; nothing is spawned and no real host path is read. They prove the constructed Bubblewrap argument vector (namespaces, cleared environment, private roots and mount order, merged-/usr handling, display sockets, refused inputs), not that the sandbox works: C04's browser tests own that.
 
+### C04 browser launch tests
+
+The real-browser tests are behind the `browser-tests` feature and need the pinned browser plus Bubblewrap:
+
+```bash
+AERO_REQUIRE_BROWSER=1 \
+AERO_CHROMIUM="$HOME/.cache/aerobrowser/browsers/156.0.8078.47/chrome-linux64/chrome" \
+cargo test -p aero-cdp --locked --test sandbox --features browser-tests -- --nocapture
+```
+
+`AERO_BWRAP` selects Bubblewrap (default `/usr/bin/bwrap`). Without `AERO_REQUIRE_BROWSER=1` a missing browser makes these tests print a skip notice and pass, so gates must set it. Each test uses private temporary run directories, opens only `about:blank`, local `file:` URLs and `chrome://sandbox`, and asserts that no `/opt/aero/browser/` process remains afterwards. If an interrupted run leaves a sandbox behind, kill its namespace init (the `bwrap` whose `NSpid` ends in 1); the kernel then kills the whole sandbox.
+
 ### B04 storage prerequisites
 
 `cargo test -p aero-agent --test journal --locked` exercises the initial schema and private opener. It requires Linux procfs and a local filesystem supporting SQLite WAL, advisory locks, ownership and Unix permission bits. Supply an absolute dedicated path; only its final missing directory is created. Existing directories/files must already be owned and private (0700/0600). Symlinks, hardlinks, foreign owners, writable nonsticky ancestors and unsupported schemas fail closed; the opener does not chmod existing data. Do not point it at Windows-mounted, network or arbitrary shared storage and assume equivalent guarantees. B06's config module now supplies private XDG/task paths; Store alone is not task-controller authority. The lock coordinates cooperating Store instances, not hostile same-UID/root SQL writers.

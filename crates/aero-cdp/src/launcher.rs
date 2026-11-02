@@ -69,6 +69,34 @@ pub struct HostLayout {
     pub entries: BTreeMap<PathBuf, HostEntry>,
 }
 
+impl HostLayout {
+    /// `lstat` `/usr`, [`MERGED_USR_PATHS`] and [`ETC_RUNTIME_PATHS`] on this
+    /// host. Paths that cannot be inspected are treated as absent.
+    pub fn probe() -> Self {
+        let mut entries = BTreeMap::new();
+        let candidates = std::iter::once("/usr")
+            .chain(MERGED_USR_PATHS.iter().copied())
+            .chain(ETC_RUNTIME_PATHS.iter().copied());
+        for path in candidates.map(Path::new) {
+            let Ok(meta) = std::fs::symlink_metadata(path) else {
+                continue;
+            };
+            let entry = if meta.file_type().is_symlink() {
+                match std::fs::read_link(path) {
+                    Ok(target) => HostEntry::Symlink(target),
+                    Err(_) => continue,
+                }
+            } else if meta.is_dir() {
+                HostEntry::Directory
+            } else {
+                HostEntry::File
+            };
+            entries.insert(path.to_owned(), entry);
+        }
+        Self { entries }
+    }
+}
+
 /// How the browser is displayed.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Display {

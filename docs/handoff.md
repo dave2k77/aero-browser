@@ -1,8 +1,28 @@
 # AeroBrowser — implementation handoff
 
-Document-set revision: 2.24. Current checkpoint: chain batch CH-9 (C03) below, uncommitted and ready for review. Everything through de6c2e0 (CH-8, C01/C02) is committed and pushed; a540588 (CH-7) was pushed with it. Prior checkpoints below are historical where their next actions or test counts differ.
+Document-set revision: 2.25. Current checkpoint: chain batch CH-10 (C04) below, uncommitted and ready for review. Everything through 34fca13 (CH-9, C03) is committed and pushed. Prior checkpoints below are historical where their next actions or test counts differ.
 
-## Current chain batch CH-9 checkpoint
+## Current chain batch CH-10 checkpoint
+
+The owner said “yes, go ahead” to committing C03 and starting C04. C03 was committed as 34fca13 and pushed (remote main read back at the same SHA).
+
+CH-10 — C04 owned browser startup and cleanup, uncommitted, WSL2 evidence only:
+
+- Feasibility first (throwaway, not kept): the pinned Chrome for Testing 156.0.8078.47 in the C03 sandbox wrote `DevToolsActivePort` in about 0.9 s; Chromium's zygote, renderer and storage service ran in nested PID namespaces, renderer/storage with `Seccomp: 2`; stderr held only D-Bus connection errors (no bus is reachable). The network service runs with `--service-sandbox-type=none` and the GPU process unfiltered — Chromium's own headless defaults, not a flag of ours; recorded for the security review.
+- `crates/aero-cdp/src/runtime.rs`: `BrowserProcess::launch(&SandboxSpec, LaunchLimits)` → `endpoint()` (`ws://127.0.0.1:PORT/devtools/browser/UUID`), `stderr_tail()`, `shutdown() -> ShutdownReport { status, sandbox_emptied }` (blocking; use `spawn_blocking`), teardown on drop. `LaunchError`: `StaleProfile` (nothing spawned or deleted), `Spawn`, `SandboxNotStarted` (no namespace init within 2 s), `EarlyExit { code, signal, stderr }`, `ReadinessTimeout { stderr }`, `TeardownIncomplete` (overrides the cause when an observed sandbox could not be verified empty). Every failure tears down before returning.
+- Teardown: SIGKILL the namespace init through its pidfd (cannot hit a reused PID), then kill and reap Bubblewrap, then wait for the pidfd. The kernel completes the init's exit only after every process in its namespace, including Chromium's nested namespaces, has exited, so a readable pidfd proves the sandbox is empty.
+- Defect found by the tests and fixed: the first implementation killed only Bubblewrap and relied on `--die-with-parent`. `readiness_failure_reaps_child` (1 ms deadline) reported `TeardownIncomplete`, and 15 Chromium processes really survived under an orphaned namespace init reparented to PID 321 — the init arms its parent-death signal only after it starts. The leftover sandbox was killed by its init only (after checking its command line and `NSpid`), and teardown now kills the init through the pidfd. 5 full-suite runs and 20 runs of that test since: no failures, no leftovers.
+- Port-file handling: the profile is writable from inside the sandbox, so `DevToolsActivePort` is opened with `O_NOFOLLOW | O_NONBLOCK`, must be a regular file of at most 4096 bytes, and must match `PORT\n/devtools/browser/<lowercase UUID>` exactly (a torn write cannot validate). Liveness is rechecked after a valid read.
+- Tests: `crates/aero-cdp/tests/sandbox.rs` — `host_probe_reports_this_hosts_runtime`, `stale_devtools_port_file_is_refused_before_spawning` (default suite) and, with `--features browser-tests`, `launch_reaches_cdp` (Browser.getVersion reports Chrome/156), `readiness_failure_reaps_child` (timeout and early exit, nothing left), `sandbox_cannot_read_host_canary` (a synthetic canary and its directory listing outside the mounts stay unreadable while a positive-control file in the staging mount is readable), `renderer_sandbox_remains_enabled` (`chrome://sandbox` says "You are adequately sandboxed"; independently every renderer has `Seccomp: 2` in a PID namespace other than the browser's). Runtime unit tests: strict port-file parsing, symlink/FIFO/size refusal, bounded redacted stderr, teardown claims empty only after the init exits (a pidfd on PID 1 stands in for an init that cannot be killed; skipped as root). Red/green: the unit tests and the browser tests (after the probe was implemented) failed against stubs, then passed; the first half of `readiness_failure_reaps_child` passed vacuously against the stub, its early-exit half was red. Mutation pass with leftover cleanup between mutants: 13 defects, all caught after two gaps were closed (ring trimming across pushes; teardown claiming empty without waiting). An earlier mutation run was discarded because the first mutant's leftovers contaminated the others.
+- `AERO_REQUIRE_BROWSER=1` without `AERO_CHROMIUM` fails all four browser tests; without the flag they print a skip notice and pass.
+- Dependencies: `libc` and `tempfile` (both already locked) now listed for aero-cdp; Cargo.lock changes only that dependency list.
+- Gates: workspace 284 passed (278 + 6), 0 failed/ignored; `cargo test -p aero-cdp --features browser-tests` with the browser 32 passed; warning-denied Clippy for the workspace and for aero-cdp with all features, fmt, warning-denied rustdoc, the documentation checker and `git diff --check` pass. Not independently reviewed.
+
+Limits: WSL2 only — native Ubuntu 24.04 with AppArmor's unprivileged user-namespace restriction is untested (ENV-004) and may need the distribution's Bubblewrap profile. Doctor still reports `runtime_ready=false` and does not run these checks. Teardown is SIGKILL only (no graceful `Browser.close`), so profiles are not cleanly shut down; per-run profiles make that acceptable for now. The browser executable is not re-hashed against `packaging/browser-lock.json` at launch. Stderr redaction removes URL queries/fragments and control characters only (F01 owns full redaction). Host network sharing remains reported, not isolated.
+
+Next: C05 target attachment and navigation (one auto-attach authority, page sessions distinct from the browser session).
+
+## Previous chain batch CH-9 checkpoint (committed 34fca13)
 
 The owner (returning from Telegram-driven work in another session) said: “check the changes thoroughly and if all is well push and move on to the next task.” CH-8 was reviewed (see its review bullet below), committed as de6c2e0 and pushed with a540588; remote main read back at de6c2e0.
 
@@ -20,7 +40,7 @@ Limits and notes for C04: no `/sys`, `/etc/passwd` or GPU device access is provi
 
 Next: C04 real launch (`launch_reaches_cdp`, `readiness_failure_reaps_child`, `sandbox_cannot_read_host_canary`, `renderer_sandbox_remains_enabled`) using the pinned Chrome for Testing 156.0.8078.47 build.
 
-## Previous chain batch CH-8 checkpoint (committed de6c2e0)
+### Earlier: chain batch CH-8 checkpoint (committed de6c2e0)
 
 The owner said “proceed to commit and move on to the next task”. CH-7 was rerun (workspace 256 passed, Clippy/fmt/rustdoc clean) and committed as a540588 — not pushed, because only a commit was requested. DEC-012 (claims format) remains pending; it blocks report generation, not the browser runtime.
 
