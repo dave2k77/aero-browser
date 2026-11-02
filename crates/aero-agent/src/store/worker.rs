@@ -293,6 +293,26 @@ impl JournalClient {
         identifier(task_id.as_str())?;
         self.submit(move |s| s.delete_task(task_id))
     }
+    /// N05 phase 2, reachable only from `TaskAuthority::complete_run` with
+    /// results computed by the crate's own evaluator. In one transaction:
+    /// recheck that the run is open and current at the latest revision, no
+    /// task work is unresolved, the budget is consistent, and every verified
+    /// artifact record is unchanged; record the results; and complete the run
+    /// and task only if every required criterion passed and every required
+    /// output verified. Returns whether it completed.
+    pub(crate) fn finalize_run(
+        &self,
+        context: RunContext,
+        evaluation: crate::verification::Evaluation,
+    ) -> Result<Reply<bool>, StoreError> {
+        context_valid(&context)?;
+        for result in &evaluation.results {
+            result
+                .validate_for(&context)
+                .map_err(|_| StoreError::InvalidInput)?;
+        }
+        self.submit(move |s| s.finalize_run(context, evaluation))
+    }
     /// Mark a `deleting` tombstone complete after file cleanup; idempotent.
     pub(crate) fn complete_deletion(&self, task_key: String) -> Result<Reply<()>, StoreError> {
         task_key_valid(&task_key)?;
@@ -606,6 +626,7 @@ impl Store {
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate))?;
         no_pending(&tx, &contract.task_id)?;
+        task_not_completed(&tx, &contract.task_id)?;
         let latest = latest_revision(&tx, &contract.task_id)?;
         if latest.checked_add(1) != Some(contract.revision) {
             return Err(StoreError::Conflict);
@@ -651,6 +672,7 @@ impl Store {
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate))?;
         no_pending(&tx, &context.task_id)?;
+        task_not_completed(&tx, &context.task_id)?;
         if latest_revision(&tx, &context.task_id)? != context.contract_revision {
             return Err(StoreError::Conflict);
         }
@@ -841,6 +863,91 @@ impl Store {
             .map(|step| read_action(&self.connection, &context, step))
             .collect::<Result<_, _>>()?;
         Ok(AuditPage { entries, has_more })
+    }
+    fn finalize_run(
+        &mut self,
+        context: RunContext,
+        evaluation: crate::verification::Evaluation,
+    ) -> Result<bool, StoreError> {
+        let task = &context.task_id;
+        let now = stamp()?;
+        let tx = sql(self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate))?;
+        let (contract, _, status) = read_run(&tx, &context)?;
+        if !matches!(status.as_str(), "running" | "paused")
+            || latest_revision(&tx, task)? != context.contract_revision
+        {
+            return Err(StoreError::Conflict);
+        }
+        no_pending(&tx, task)?;
+        read_usage(&tx, task)?.within(&contract)?;
+        for (id, sha256) in &evaluation.verified {
+            let record = load_artifact(&tx, task, id)?;
+            if record.sha256 != *sha256 || record.context != context {
+                return Err(StoreError::Conflict);
+            }
+        }
+        // Results must cover exactly the accepted contract's criteria.
+        let mut results = std::collections::HashMap::new();
+        for result in &evaluation.results {
+            if results
+                .insert(result.criterion_id.as_str(), result)
+                .is_some()
+            {
+                return Err(StoreError::InvalidInput);
+            }
+        }
+        if results.len() != contract.criteria.len()
+            || contract
+                .criteria
+                .iter()
+                .any(|c| !results.contains_key(c.id()))
+        {
+            return Err(StoreError::InvalidInput);
+        }
+        let required: Vec<VerificationStatus> = contract
+            .criteria
+            .iter()
+            .filter(|c| c.required())
+            .map(|c| results[c.id()].status)
+            .collect();
+        let outputs_verified = contract
+            .outputs
+            .iter()
+            .filter(|o| o.required)
+            .all(|o| evaluation.verified_outputs.contains(&o.name));
+        let completed =
+            aero_core::verification::completion_gate(&required, outputs_verified, false);
+        for result in &evaluation.results {
+            let status = serde_json::to_value(result.status)
+                .ok()
+                .and_then(|v| v.as_str().map(str::to_owned))
+                .ok_or(StoreError::InvalidInput)?;
+            sql(tx.execute(
+                "INSERT INTO criterion_results VALUES (?1,?2,?3,?4,?5,?6) ON CONFLICT(task_id,contract_revision,criterion_id,session_id) DO UPDATE SET status=excluded.status,result_json=excluded.result_json",
+                params![
+                    task.as_str(),
+                    integer(context.contract_revision)?,
+                    result.criterion_id,
+                    context.run_id.as_str(),
+                    status,
+                    encode(result)?
+                ],
+            ))?;
+        }
+        if completed {
+            sql(tx.execute(
+                "UPDATE sessions SET status='completed',updated_at=?2 WHERE id=?1",
+                params![context.run_id.as_str(), now],
+            ))?;
+            sql(tx.execute(
+                "UPDATE tasks SET status='completed',updated_at=?2 WHERE id=?1",
+                params![task.as_str(), now],
+            ))?;
+        }
+        sql(tx.commit())?;
+        Ok(completed)
     }
     fn delete_task(&mut self, task_id: TaskId) -> Result<(), StoreError> {
         let key = crate::config::path_key(b"task", task_id.as_str())?;
@@ -1073,6 +1180,19 @@ fn read_run(
 }
 fn has_pending(c: &Connection, task: &TaskId) -> Result<bool, StoreError> {
     sql(c.query_row("SELECT EXISTS(SELECT 1 FROM actions a JOIN sessions s ON s.id=a.session_id WHERE s.task_id=?1 AND a.state IN ('prepared','uncertain')) OR EXISTS(SELECT 1 FROM budget_reservations WHERE task_id=?1 AND state IN ('reserved','uncertain')) OR EXISTS(SELECT 1 FROM work_reservations WHERE task_id=?1 AND state IN ('reserved','uncertain')) OR EXISTS(SELECT 1 FROM tasks WHERE id=?1 AND status='needs_review')",[task.as_str()],|r|r.get(0)))
+}
+/// A completed task is final: no new run or revision may reopen it.
+fn task_not_completed(c: &Connection, task: &TaskId) -> Result<(), StoreError> {
+    let completed: bool = sql(c.query_row(
+        "SELECT EXISTS(SELECT 1 FROM tasks WHERE id=?1 AND status='completed')",
+        [task.as_str()],
+        |r| r.get(0),
+    ))?;
+    if completed {
+        Err(StoreError::Conflict)
+    } else {
+        Ok(())
+    }
 }
 /// The deletion tombstone state for a task ID, if it was ever deleted.
 fn tombstone_state(c: &Connection, task: &TaskId) -> Result<Option<String>, StoreError> {

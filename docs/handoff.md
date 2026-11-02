@@ -1,8 +1,25 @@
 # AeroBrowser — implementation handoff
 
-Document-set revision: 2.20. Current checkpoint: chain batch CH-5 below (uncommitted, ready for review). Everything through fa09ba9 (CH-4) is committed and pushed. Prior checkpoints below are historical where their next actions or test counts differ.
+Document-set revision: 2.21. Current checkpoint: chain batch CH-6 below (uncommitted, ready for review). Everything through 71ed9d4 (CH-5) is committed and pushed. Prior checkpoints below are historical where their next actions or test counts differ.
 
-## Current chain batch CH-5 checkpoint
+## Current chain batch CH-6 checkpoint
+
+CH-5 was approved, committed as 71ed9d4 and pushed (remote main read back at the same SHA). The owner then said “yes, go ahead” to CH-6.
+
+CH-6 — N05 completion gate, uncommitted, per DEC-009 (no attestation):
+
+- `crates/aero-agent/src/verification/completion.rs`: the host supplies only `OutputBinding`s (which committed artifact is which contract output). Phase 1 loads each record, requires it to belong to this run (else OwnershipMismatch), reads the bytes back, and evaluates every criterion of the accepted contract itself: `ArtifactSchema` (exact ordered CSV header) and `RowCount` (CSV data records) with a strict RFC 4180 reader; unbound outputs are Inconclusive/Unavailable, failed readback Inconclusive/InvalidReadback, malformed CSV Inconclusive/InvalidReadback, and `EvidenceCoverage` or non-CSV checks Inconclusive/Unsupported.
+- `crates/aero-agent/src/store/worker.rs`: crate-private `finalize_run` — one transaction rechecks the run is open (running/paused) at the latest revision, no unresolved task work, usage within the contract, verified artifact records unchanged, and that results cover exactly the contract's criteria; upserts `criterion_results`; completes run and task only when every required criterion Passed and every required output verified. `start_run`/`revise_contract` refuse a completed task (Conflict); prepare already refuses non-open runs.
+- `crates/aero-agent/src/tasks.rs`: `TaskAuthority::complete_run(&store, context, bindings) -> CompletionReport { completed, results }`.
+- Schema (DEC-010 in place): completed runs and tasks cannot change status; a completed run's criterion results cannot be updated or deleted except by the task cascade.
+- Tests: `crates/aero-agent/tests/completion.rs` (completes once and is then final; failed/unverifiable criteria and bad bindings leave the run open and a later correct output completes it; the full documented fixture never completes because evidence coverage is unsupported; unresolved work, a superseded run or revision, or another run's artifact block completion) and unit `finalize_rechecks_unresolved_work_record_identity_and_outputs`. Process note: these were written before the implementation but not run against a scaffold, so there is no red observation. Instead, seven deliberate defects were injected one at a time with automatic restore; two initially survived (skipped required-output check, skipped finalize unresolved-work recheck — both unreachable through the public API because contract validation and the phase-1 resume read already cover them), the unit test was added, and all seven are now caught.
+- Gates: workspace 252 passed (239 behavior + 13 compile-fail doctests), 0 failed/ignored; warning-denied Clippy, fmt and warning-denied rustdoc pass. Not independently reviewed.
+
+Limits: passing proves byte shape, not truth or sourcing. The documented G1 fixture requires evidence coverage on a Markdown report and therefore cannot complete until CH-7 defines how report claims cite captures and compares each claim against loaded evidence (`load_evidence` + `EvidenceStore::load`, never caller facts). No orchestrator calls the gate yet. Blocking API (host thread). File bytes can still change after completion; the immutable record keeps the verified digest, so later readback detects it.
+
+Next: CH-7 evidence coverage (claim/citation format, per-claim comparison), then C01–C04/D01 browser runtime for real capture.
+
+## Previous chain batch CH-5 checkpoint (committed 71ed9d4)
 
 CH-4 was approved, committed as fa09ba9 and pushed (remote main read back at the same SHA). The owner then said “yes, go ahead” to CH-5.
 
@@ -19,7 +36,7 @@ Limits: deletion is blocking (host thread). Gateways are retired even if deletio
 
 Next: CH-6 N05 atomic completion gate.
 
-## Previous chain batch CH-4 checkpoint (committed fa09ba9)
+### Earlier: chain batch CH-4 checkpoint (committed fa09ba9)
 
 CH-3 was approved, committed as 7f88df2 and pushed (remote main read back at the same SHA). The owner then said “yes, go ahead” to CH-4.
 

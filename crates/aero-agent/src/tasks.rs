@@ -117,6 +117,44 @@ impl TaskAuthority {
             .complete_deletion(crate::config::path_key(b"task", task.as_str())?)?
             .blocking_recv()
     }
+    /// N05 completion gate. `outputs` only says which committed artifact of
+    /// this run is which contract output; the gate reads each back against its
+    /// immutable journal record and evaluates the accepted contract's criteria
+    /// itself, then the journal rechecks run, revision, unresolved work, budget
+    /// and record identity atomically with recording results and completing.
+    /// `store` must be this task's open artifact store. Blocking (host thread).
+    ///
+    /// `completed` is false when any required criterion is not Passed or a
+    /// required output is unbound or failed readback; the run stays open.
+    /// A completed run and task are final. Unsupported criteria (evidence
+    /// coverage, non-CSV checks) are Inconclusive and block completion.
+    pub fn complete_run(
+        &self,
+        store: &crate::artifacts::ArtifactStore,
+        context: RunContext,
+        outputs: Vec<crate::verification::OutputBinding>,
+    ) -> Result<crate::verification::CompletionReport, StoreError> {
+        let resume = self.journal.load_resume(context.clone())?.blocking_recv()?;
+        if !matches!(
+            resume.current_status,
+            aero_core::checkpoint::RunStatus::Running | aero_core::checkpoint::RunStatus::Paused
+        ) {
+            return Err(StoreError::Conflict);
+        }
+        let evaluation = crate::verification::evaluate(
+            &resume.contract,
+            &context,
+            store,
+            &self.journal,
+            outputs,
+        )?;
+        let results = evaluation.results.clone();
+        let completed = self
+            .journal
+            .finalize_run(context, evaluation)?
+            .blocking_recv()?;
+        Ok(crate::verification::CompletionReport { completed, results })
+    }
     /// Finish deletions whose tombstone is still `deleting` (e.g. after a
     /// crash). Returns how many were completed. Busy if a task is in use.
     pub fn resume_deletions(&self, state: &PrivateState) -> Result<usize, StoreError> {

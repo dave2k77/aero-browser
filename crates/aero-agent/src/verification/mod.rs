@@ -10,5 +10,8 @@
 //! trusted host must keep its registry, sources and raw JournalClient away from
 //! model adapters. JournalClient still accepts trusted host StepOutcome reports;
 //! N04 does not prove their provenance or connect them to this registry.
+mod completion;
 mod registry;
+pub use completion::{CompletionReport, OutputBinding};
+pub(crate) use completion::{Evaluation, evaluate};
 pub use registry::{Readback, ReadbackError, ReadbackQuery, ReadbackSource, VerifierRegistry};

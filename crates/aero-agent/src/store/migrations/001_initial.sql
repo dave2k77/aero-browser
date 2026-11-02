@@ -246,5 +246,18 @@ BEGIN SELECT RAISE(ABORT, 'tombstones only move from deleting to complete'); END
 CREATE TRIGGER no_tombstone_replacement BEFORE INSERT ON task_tombstones
 WHEN EXISTS(SELECT 1 FROM task_tombstones WHERE task_key=NEW.task_key)
 BEGIN SELECT RAISE(ABORT, 'tombstone already exists'); END;
+-- N05: a completed run, its task and its recorded results are final.
+CREATE TRIGGER completed_run_is_final BEFORE UPDATE OF status ON sessions
+WHEN OLD.status = 'completed'
+BEGIN SELECT RAISE(ABORT, 'completed runs are final'); END;
+CREATE TRIGGER completed_task_is_final BEFORE UPDATE OF status ON tasks
+WHEN OLD.status = 'completed'
+BEGIN SELECT RAISE(ABORT, 'completed tasks are final'); END;
+CREATE TRIGGER completed_results_are_immutable BEFORE UPDATE ON criterion_results
+WHEN EXISTS(SELECT 1 FROM sessions WHERE id=OLD.session_id AND status='completed')
+BEGIN SELECT RAISE(ABORT, 'results of a completed run are immutable'); END;
+CREATE TRIGGER completed_results_are_kept BEFORE DELETE ON criterion_results
+WHEN EXISTS(SELECT 1 FROM sessions WHERE id=OLD.session_id AND status='completed')
+BEGIN SELECT RAISE(ABORT, 'delete the owning task, not completed results'); END;
 PRAGMA application_id = 1095062095;
 PRAGMA user_version = 1;

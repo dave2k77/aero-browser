@@ -208,6 +208,8 @@ Accepted: the user now says, “Ok, let's resolve this bug, and let's find any o
 
 Accepted 2026-11-02: asked how criteria that cannot be machine-checked could ever pass, the owner chose “No attestation for now: such criteria stay inconclusive/needs_review and the task cannot auto-complete; only machine-verified criteria complete.” N05 therefore implements no attestation path, owner or model. A contract with a subjective criterion cannot reach completed; it stays needs_review. Revisiting attestation is a new decision, not an extension of this one.
 
+Implementation note (CH-6): the completion gate has no attestation path. Criteria it cannot check by machine (currently evidence coverage and any non-CSV check) are recorded Inconclusive and block completion.
+
 Historical record before acceptance — partially resolved: the owner authorized N17/N18, but those packages now have only partial foundations and are blocked on the missing prerequisites in the [current handoff](handoff.md#current-n17n18-blocked-checkpoint). An explicitly permitted, attributed trusted-user attestation contract remains a separate decision. The current N05 pure predicate and narrow journal test do not establish completion, artifact/evidence truth or attestation. Finalization must close the transaction/freshness race described in the [N05 handoff](handoff.md#current-n05-checkpoint). No reset, migration, staging, commit or push was implied by the prerequisite approval.
 
 #### DEC-010 — Unshipped schema evolution policy

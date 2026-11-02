@@ -1028,3 +1028,63 @@ fn encryption_required_payloads_and_validation_errors_never_leak() {
         }
     }
 }
+
+#[test]
+fn finalize_rechecks_unresolved_work_record_identity_and_outputs() {
+    // Phase 2 must not trust phase 1: work prepared, or a record changed,
+    // between evaluation and finalization prevents completion, and a required
+    // output must be verified even if every result says Passed.
+    use aero_core::verification::{
+        CheckMethod, CheckReason, CriterionResult, VERIFICATION_SCHEMA_VERSION,
+    };
+    let (_parent, path) = directory();
+    let mut store = seeded(&path);
+    let committed = commit();
+    let artifact = committed.artifacts[0].id.clone();
+    let evaluation = |sha: &str, outputs: bool| crate::verification::Evaluation {
+        results: contract()
+            .criteria
+            .iter()
+            .map(|c| CriterionResult {
+                schema_version: VERIFICATION_SCHEMA_VERSION,
+                context: context(),
+                criterion_id: c.id().to_owned(),
+                status: VerificationStatus::Passed,
+                method: CheckMethod::ArtifactSchema,
+                evidence_ids: vec![],
+                artifact_ids: vec![artifact.clone()],
+                checked_at_ms: 1,
+                reason: CheckReason::Matched,
+            })
+            .collect(),
+        verified: vec![(artifact.clone(), sha.to_owned())],
+        verified_outputs: if outputs {
+            contract().outputs.iter().map(|o| o.name.clone()).collect()
+        } else {
+            vec![]
+        },
+    };
+    let good = "b".repeat(64);
+    store.prepare_action(prepare()).unwrap();
+    assert_eq!(
+        store.finalize_run(context(), evaluation(&good, true)),
+        Err(StoreError::NeedsReview)
+    );
+    store.commit_step(committed).unwrap();
+    assert_eq!(
+        store.finalize_run(context(), evaluation(&"c".repeat(64), true)),
+        Err(StoreError::Conflict)
+    );
+    assert_eq!(
+        store.finalize_run(context(), evaluation(&good, false)),
+        Ok(false)
+    );
+    assert_eq!(
+        store.finalize_run(context(), evaluation(&good, true)),
+        Ok(true)
+    );
+    assert_eq!(
+        store.finalize_run(context(), evaluation(&good, true)),
+        Err(StoreError::Conflict)
+    );
+}
