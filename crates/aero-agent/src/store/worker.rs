@@ -23,6 +23,10 @@ use tokio::sync::oneshot;
 pub const MAX_PAYLOAD_BYTES: usize = 256 * 1024;
 pub const MAX_AUDIT_PAGE: usize = 100;
 const MAX_RECORDS: usize = 64;
+/// Upper bound on one task's artifact records returned for reconciliation.
+pub const MAX_ARTIFACT_INVENTORY: usize = 1024;
+// An artifact record is small typed JSON; longer stored rows are corrupt.
+const ARTIFACT_ROW_LIMIT: i64 = 4096;
 const READ_LIMIT: i64 = MAX_PAYLOAD_BYTES as i64 + 1;
 type Job = Box<dyn FnOnce(&mut Store) + Send>;
 type Queue = Arc<Mutex<Option<mpsc::SyncSender<Job>>>>;
@@ -253,6 +257,17 @@ impl JournalClient {
         identifier(task_id.as_str())?;
         identifier(id.as_str())?;
         self.submit(move |s| load_artifact(&s.connection, &task_id, &id))
+    }
+    /// Trusted host inventory of every committed artifact record for a task,
+    /// ordered by ID, for reconciliation with `ArtifactStore::reconcile`. More
+    /// than [`MAX_ARTIFACT_INVENTORY`] records is BudgetExceeded rather than a
+    /// silently truncated (and therefore falsely consistent) inventory.
+    pub fn load_artifacts(
+        &self,
+        task_id: TaskId,
+    ) -> Result<Reply<Vec<ArtifactRecord>>, StoreError> {
+        identifier(task_id.as_str())?;
+        self.submit(move |s| load_artifacts(&s.connection, &task_id))
     }
     /// Deletes SQL-owned records only, not files/profiles/derived stores (N16).
     /// This operation does not acquire the task lease or stop an existing writer.
@@ -1186,7 +1201,37 @@ fn load_artifact(
         )
         .optional())?
     .ok_or(StoreError::NotFound)?;
-    let record: ArtifactRecord = decode(&json)?;
+    checked_artifact(&json, task_id, id)
+}
+fn load_artifacts(c: &Connection, task_id: &TaskId) -> Result<Vec<ArtifactRecord>, StoreError> {
+    let mut statement = sql(c.prepare(
+        "SELECT id, substr(metadata_json,1,?2) FROM artifacts WHERE task_id=?1 ORDER BY id LIMIT ?3",
+    ))?;
+    let rows = sql(statement.query_map(
+        params![
+            task_id.as_str(),
+            ARTIFACT_ROW_LIMIT,
+            integer(MAX_ARTIFACT_INVENTORY as u64 + 1)?
+        ],
+        |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)),
+    ))?;
+    let mut records = Vec::new();
+    for row in rows {
+        let (id, json) = sql(row)?;
+        if records.len() == MAX_ARTIFACT_INVENTORY {
+            return Err(StoreError::BudgetExceeded);
+        }
+        records.push(checked_artifact(&json, task_id, &ArtifactId::from(id))?);
+    }
+    Ok(records)
+}
+/// A stored row must decode to a record for exactly this task and ID.
+fn checked_artifact(
+    json: &str,
+    task_id: &TaskId,
+    id: &ArtifactId,
+) -> Result<ArtifactRecord, StoreError> {
+    let record: ArtifactRecord = decode(json)?;
     digest(&record.sha256).map_err(|_| StoreError::CorruptDatabase)?;
     if record.id != *id
         || record.context.task_id != *task_id

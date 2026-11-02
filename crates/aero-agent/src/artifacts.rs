@@ -65,6 +65,35 @@ impl StagedArtifact {
     }
 }
 
+/// Upper bound on directory entries examined by one reconciliation.
+pub const MAX_RECONCILE_ENTRIES: usize = 4096;
+
+/// Snapshot comparison of a task's journal artifact records with its private
+/// artifact directory. Each list is sorted by ID. This is a report only:
+/// nothing is deleted, repaired or re-recorded (N16 owns cleanup).
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct ArtifactReconciliation {
+    /// Recorded, present, and the actual bytes match the record.
+    pub verified: Vec<ArtifactId>,
+    /// Recorded, but no file exists.
+    pub missing: Vec<ArtifactId>,
+    /// Recorded, but the entry is unsafe or its bytes differ from the record.
+    pub mismatched: Vec<ArtifactId>,
+    /// A regular file with a name this task's store generates, but no record:
+    /// typically staged before a crash, failed or uncertain step.
+    pub unrecorded: Vec<ArtifactId>,
+    /// Any other entry: foreign or malformed names, or non-regular files.
+    pub unexpected_entries: usize,
+}
+impl ArtifactReconciliation {
+    pub fn is_consistent(&self) -> bool {
+        self.missing.is_empty()
+            && self.mismatched.is_empty()
+            && self.unrecorded.is_empty()
+            && self.unexpected_entries == 0
+    }
+}
+
 pub struct ArtifactStore {
     directory: File,
     task_key: String,
@@ -127,6 +156,75 @@ impl ArtifactStore {
         }
         let length = usize::try_from(record.bytes).map_err(|_| StoreError::BudgetExceeded)?;
         self.read_checked(&record.id, length, &record.sha256)
+    }
+
+    /// Compare `records` (from `JournalClient::load_artifacts`) with the files
+    /// in this task's artifact directory, reading back every recorded file.
+    ///
+    /// The result is a snapshot. Run it while this store is not staging and no
+    /// step is prepared (e.g. before resuming); a concurrent `stage` can appear
+    /// as unrecorded. Records must belong to this task and be unique.
+    pub fn reconcile(
+        &self,
+        records: &[ArtifactRecord],
+    ) -> Result<ArtifactReconciliation, StoreError> {
+        if records.len() > crate::store::worker::MAX_ARTIFACT_INVENTORY {
+            return Err(StoreError::BudgetExceeded);
+        }
+        let mut recorded = std::collections::HashSet::new();
+        for record in records {
+            if path_key(b"task", record.context.task_id.as_str())? != self.task_key
+                || artifact_task_key(record.id.as_str()).ok_or(StoreError::InvalidInput)?
+                    != self.task_key
+            {
+                return Err(StoreError::OwnershipMismatch);
+            }
+            if !recorded.insert(record.id.as_str()) {
+                return Err(StoreError::InvalidInput);
+            }
+        }
+        let mut report = ArtifactReconciliation::default();
+        // The live owned descriptor, not a caller path; see store::open.
+        let listing = std::fs::read_dir(format!("/proc/self/fd/{}", self.directory.as_raw_fd()))
+            .map_err(|_| StoreError::Io)?;
+        for (count, entry) in listing.enumerate() {
+            if count >= MAX_RECONCILE_ENTRIES {
+                return Err(StoreError::BudgetExceeded);
+            }
+            let entry = entry.map_err(|_| StoreError::Io)?;
+            let name = entry.file_name();
+            let name = name.to_str();
+            if name.is_some_and(|n| recorded.contains(n)) {
+                continue;
+            }
+            // file_type does not follow symlinks.
+            let regular = entry.file_type().map_err(|_| StoreError::Io)?.is_file();
+            match name {
+                Some(n) if regular && artifact_task_key(n) == Some(self.task_key.as_str()) => {
+                    report.unrecorded.push(ArtifactId::from(n))
+                }
+                _ => report.unexpected_entries += 1,
+            }
+        }
+        for record in records {
+            match self.verify(record) {
+                Ok(_) => report.verified.push(record.id.clone()),
+                Err(StoreError::NotFound) => report.missing.push(record.id.clone()),
+                Err(StoreError::Conflict | StoreError::UnsafePath | StoreError::BudgetExceeded) => {
+                    report.mismatched.push(record.id.clone())
+                }
+                Err(other) => return Err(other),
+            }
+        }
+        for list in [
+            &mut report.verified,
+            &mut report.missing,
+            &mut report.mismatched,
+            &mut report.unrecorded,
+        ] {
+            list.sort_by(|a, b| a.as_str().cmp(b.as_str()));
+        }
+        Ok(report)
     }
 
     /// Reopen without following links, validate the private file, bound the read,

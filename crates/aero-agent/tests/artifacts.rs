@@ -1,11 +1,15 @@
 #![cfg(target_os = "linux")]
 
 use aero_agent::{
-    artifacts::{ArtifactPersistence, ArtifactStore, MAX_ARTIFACT_BYTES},
+    artifacts::{
+        ArtifactPersistence, ArtifactReconciliation, ArtifactStore, MAX_ARTIFACT_BYTES,
+        MAX_RECONCILE_ENTRIES,
+    },
     config::StateConfig,
     store::StoreError,
     store::worker::{
-        ArtifactRecord, CommitStep, Journal, PrepareAction, PreparedAction, Resources, StepOutcome,
+        ArtifactRecord, CommitStep, Journal, MAX_ARTIFACT_INVENTORY, PrepareAction, PreparedAction,
+        Resources, StepOutcome,
     },
     tasks::TaskAuthority,
 };
@@ -477,4 +481,185 @@ fn committed_artifact_records_are_immutable_and_corruption_is_refused() {
     assert_eq!(load(id).unwrap().sha256, staged.sha256());
     assert_eq!(load(&other).err(), Some(StoreError::CorruptDatabase));
     journal.close().unwrap();
+}
+
+#[test]
+fn reconciliation_reports_unrecorded_missing_and_mismatched_files() {
+    let home = private_tempdir();
+    let state = StateConfig::resolve(Some(home.path()), None)
+        .unwrap()
+        .open()
+        .unwrap();
+    let journal = started(&state, "owned");
+    let context = run("owned");
+    let lease = state.acquire_task(&TaskId::from("owned")).unwrap();
+    let store = ArtifactStore::open(&lease).unwrap();
+    let stage = |bytes: &[u8]| store.stage(ArtifactPersistence::Public, bytes).unwrap();
+    let (kept, removed, tampered) = (stage(b"kept"), stage(b"removed"), stage(b"tampered"));
+    let client = journal.client();
+    client
+        .commit_step(commit(
+            prepare(&journal, &context),
+            vec![
+                kept.record(context.clone()),
+                removed.record(context.clone()),
+                tampered.record(context.clone()),
+            ],
+        ))
+        .unwrap()
+        .blocking_recv()
+        .unwrap();
+    let records = |task: &str| {
+        client
+            .load_artifacts(TaskId::from(task))
+            .unwrap()
+            .blocking_recv()
+            .unwrap()
+    };
+    let recorded = records("owned");
+    assert_eq!(recorded.len(), 3);
+    assert!(records("other").is_empty());
+    let mut all = vec![
+        kept.id().clone(),
+        removed.id().clone(),
+        tampered.id().clone(),
+    ];
+    all.sort_by(|a, b| a.as_str().cmp(b.as_str()));
+    let clean = store.reconcile(&recorded).unwrap();
+    assert!(clean.is_consistent());
+    assert_eq!(
+        clean,
+        ArtifactReconciliation {
+            verified: all,
+            ..ArtifactReconciliation::default()
+        }
+    );
+
+    // Crash between staging and commit, lost file, modified bytes, and foreign
+    // entries are each reported. Nothing is deleted or repaired.
+    let orphan = stage(b"staged but never committed");
+    let dir = lease.directory().join("artifacts");
+    std::fs::remove_file(dir.join(removed.id().as_str())).unwrap();
+    std::fs::write(dir.join(tampered.id().as_str()), b"TAMPERED").unwrap();
+    std::fs::write(dir.join("notes.txt"), b"not an artifact").unwrap();
+    let foreign_name = format!("a1-{}-{}", "f".repeat(64), "0".repeat(32));
+    std::fs::write(dir.join(&foreign_name), b"other task name").unwrap();
+    std::fs::create_dir(dir.join(format!(
+        "a1-{}-{}",
+        &kept.id().as_str()[3..67],
+        "1".repeat(32)
+    )))
+    .unwrap();
+    let report = store.reconcile(&records("owned")).unwrap();
+    assert!(!report.is_consistent());
+    assert_eq!(
+        report,
+        ArtifactReconciliation {
+            verified: vec![kept.id().clone()],
+            missing: vec![removed.id().clone()],
+            mismatched: vec![tampered.id().clone()],
+            unrecorded: vec![orphan.id().clone()],
+            unexpected_entries: 3,
+        }
+    );
+    assert!(dir.join("notes.txt").exists() && dir.join(orphan.id().as_str()).exists());
+
+    // Records must belong to this store's task and be unique.
+    let mut foreign = recorded[0].clone();
+    foreign.context = run("other");
+    assert_eq!(
+        store.reconcile(&[foreign]).err(),
+        Some(StoreError::OwnershipMismatch)
+    );
+    assert_eq!(
+        store
+            .reconcile(&[recorded[0].clone(), recorded[0].clone()])
+            .err(),
+        Some(StoreError::InvalidInput)
+    );
+    journal.close().unwrap();
+}
+
+#[test]
+fn inventory_limits_fail_closed_instead_of_truncating() {
+    let home = private_tempdir();
+    let state = StateConfig::resolve(Some(home.path()), None)
+        .unwrap()
+        .open()
+        .unwrap();
+    let journal = started(&state, "owned");
+    let context = run("owned");
+    let lease = state.acquire_task(&TaskId::from("owned")).unwrap();
+    let store = ArtifactStore::open(&lease).unwrap();
+    let staged = store.stage(ArtifactPersistence::Public, b"x").unwrap();
+    // Seed a durable step so raw fixture rows satisfy their run foreign key.
+    journal
+        .client()
+        .commit_step(commit(
+            prepare(&journal, &context),
+            vec![staged.record(context.clone())],
+        ))
+        .unwrap()
+        .blocking_recv()
+        .unwrap();
+    journal.close().unwrap();
+    let key = &staged.id().as_str()[3..67];
+    let id = |n: usize| format!("a1-{key}-{n:032x}");
+    let sql =
+        rusqlite::Connection::open(state.journal_directory().join("journal.sqlite3")).unwrap();
+    // One committed record plus fixtures up to exactly the inventory limit.
+    for n in 1..MAX_ARTIFACT_INVENTORY {
+        let json = format!(
+            r#"{{"id":"{}","context":{{"task_id":"owned","run_id":"run","contract_revision":1}},"sha256":"{}","bytes":1}}"#,
+            id(n),
+            "0".repeat(64)
+        );
+        sql.execute(
+            "INSERT INTO artifacts VALUES (?1,'owned','run',?2,'now')",
+            rusqlite::params![id(n), json],
+        )
+        .unwrap();
+    }
+    let load = || {
+        let journal = Journal::start(state.journal_directory(), 8).unwrap();
+        let result = journal
+            .client()
+            .load_artifacts(TaskId::from("owned"))
+            .unwrap()
+            .blocking_recv();
+        journal.close().unwrap();
+        result
+    };
+    let all = load().unwrap();
+    assert_eq!(all.len(), MAX_ARTIFACT_INVENTORY);
+    let over = MAX_ARTIFACT_INVENTORY;
+    sql.execute(
+        "INSERT INTO artifacts VALUES (?1,'owned','run',?2,'now')",
+        rusqlite::params![
+            id(over),
+            format!(
+                r#"{{"id":"{}","context":{{"task_id":"owned","run_id":"run","contract_revision":1}},"sha256":"{}","bytes":1}}"#,
+                id(over),
+                "0".repeat(64)
+            )
+        ],
+    )
+    .unwrap();
+    assert_eq!(load().err(), Some(StoreError::BudgetExceeded));
+    let mut too_many = all.clone();
+    too_many.push(all[0].clone());
+    assert_eq!(
+        store.reconcile(&too_many).err(),
+        Some(StoreError::BudgetExceeded)
+    );
+
+    // Directory listings are bounded too.
+    let dir = lease.directory().join("artifacts");
+    for n in 0..MAX_RECONCILE_ENTRIES {
+        std::fs::write(dir.join(format!("extra-{n}")), b"").unwrap();
+    }
+    assert_eq!(
+        store.reconcile(&all[..1]).err(),
+        Some(StoreError::BudgetExceeded)
+    );
 }

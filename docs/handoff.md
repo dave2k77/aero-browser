@@ -1,8 +1,23 @@
 # AeroBrowser — implementation handoff
 
-Document-set revision: 2.16. Current checkpoint: chain batch CH-1 below (uncommitted, ready for review). Everything through 5af0e9d is committed and pushed. Prior checkpoints below are historical where their next actions or test counts differ.
+Document-set revision: 2.17. Current checkpoint: chain batch CH-2 below (uncommitted, ready for review). Everything through c2aa4a2 (CH-1) is committed and pushed. Prior checkpoints below are historical where their next actions or test counts differ.
 
-## Current chain batch CH-1 checkpoint
+## Current chain batch CH-2 checkpoint
+
+CH-1 was approved, committed as c2aa4a2 and pushed (remote main read back at the same SHA). The owner then said “yes, go ahead” to CH-2.
+
+CH-2 — artifact reconciliation (N18 slice), uncommitted:
+
+- `crates/aero-agent/src/store/worker.rs`: `JournalClient::load_artifacts(task)` returns the task's committed artifact records ordered by ID; more than `MAX_ARTIFACT_INVENTORY` (1024) is BudgetExceeded, never a truncated list. Rows are read with a 4 KiB per-row bound and validated by the same `checked_artifact` used by `load_artifact`.
+- `crates/aero-agent/src/artifacts.rs`: `ArtifactStore::reconcile(&records)` returns `ArtifactReconciliation { verified, missing, mismatched, unrecorded, unexpected_entries }` with `is_consistent()`. Every recorded file is read back against its record; unrecorded means a regular file with this task's generated-name shape but no record; anything else (foreign/malformed names, directories, links) is unexpected. Records must belong to this task and be unique; more than 4096 directory entries is BudgetExceeded. Listing uses the live owned directory descriptor via /proc/self/fd, as the store opener already does. Nothing is deleted, repaired or re-recorded.
+- Tests in `crates/aero-agent/tests/artifacts.rs`: `reconciliation_reports_unrecorded_missing_and_mismatched_files` observed red (empty inventory against the scaffold) then green; `inventory_limits_fail_closed_instead_of_truncating` was added after the implementation and passed on its first run, so it is coverage rather than red/green evidence.
+- Gates: workspace 238 passed (225 behavior + 13 compile-fail doctests), 0 failed/ignored; warning-denied Clippy, fmt and warning-denied rustdoc pass. Not independently reviewed.
+
+Limits: the report is a snapshot; run it under the task lease while nothing is staging and no step is prepared, otherwise an in-flight stage appears as unrecorded. Hashing reads every recorded file (up to 16 MiB each). Cleanup of unrecorded or unexpected entries is N16's job. N18 still lacks the bundle manifest and the export grant.
+
+Next: CH-3 N17 sealed capture interface and evidence rows bound into the outcome transaction.
+
+## Previous chain batch CH-1 checkpoint (committed c2aa4a2)
 
 Authorization (2026-11-02): the owner asked to resolve the blocked prerequisite chain (N05 ← N17/N18 + DEC-009; N17/N18 ← capture, N13, N16, schema). Decisions taken: DEC-009 accepted as no attestation; DEC-010 edit the unshipped v1 schema in place (no AeroBrowser state directory existed on the host, so no data is affected); DEC-011 minimal permanent tombstone, holds cannot stop a started deletion. Scope order: resolve all non-browser prerequisites in verified batches, then start C01–C04/D01 for real capture. The owner approved and the reviewed backlog was committed as seven per-package commits (each verified to build, test, lint and format on its own) and pushed: 0e7165b..5af0e9d.
 
