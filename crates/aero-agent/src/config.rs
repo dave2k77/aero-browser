@@ -80,6 +80,11 @@ impl PrivateState {
     pub fn journal_directory(&self) -> &Path {
         &self.journal_path
     }
+    // Descriptor-only access for the read-only retention preflight; never a path
+    // supplied by the caller. The retention module checks these live descriptors.
+    pub(crate) fn retention_directories(&self) -> (&File, &File) {
+        (&self._root, &self.tasks)
+    }
     pub fn acquire_task(&self, id: &TaskId) -> Result<TaskLease, StoreError> {
         let key = path_key(b"task", id.as_str())?;
         let directory = private_child_directory(&self.tasks, &key, false)?;
@@ -95,6 +100,7 @@ impl PrivateState {
         Ok(TaskLease {
             owner: Arc::new(TaskOwner {
                 path: self.root_path.join("tasks").join(&key),
+                key,
                 directory,
                 _lock: lock,
             }),
@@ -103,6 +109,7 @@ impl PrivateState {
 }
 pub(crate) struct TaskOwner {
     path: PathBuf,
+    key: String,
     directory: File,
     _lock: File,
 }
@@ -111,6 +118,13 @@ pub struct TaskLease {
     owner: Arc<TaskOwner>,
 }
 impl TaskLease {
+    /// Open the private artifact directory relative to the owned task descriptor.
+    /// The returned owner guard keeps the task lock alive with the directory.
+    pub(crate) fn artifact_directory(&self) -> Result<(File, String, Arc<TaskOwner>), StoreError> {
+        let directory = private_child_directory(&self.owner.directory, "artifacts", false)?;
+        Ok((directory, self.owner.key.clone(), Arc::clone(&self.owner)))
+    }
+
     pub fn directory(&self) -> &Path {
         &self.owner.path
     }

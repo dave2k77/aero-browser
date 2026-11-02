@@ -1,3 +1,5 @@
+use aero_agent::artifacts::{ArtifactPersistence, ArtifactStore};
+use aero_agent::config::StateConfig;
 use aero_agent::store::StoreError;
 use aero_agent::store::worker::{
     CommitStep, Journal, Persistence, PrepareAction, Resources, StepOutcome,
@@ -49,6 +51,41 @@ fn prerequisites() -> StartPrerequisites {
 }
 fn raw(path: &Path) -> Connection {
     Connection::open(path.join("journal.sqlite3")).unwrap()
+}
+
+#[test]
+fn sql_only_delete_does_not_remove_artifacts_or_stop_live_writer() {
+    // Documents an existing N16 gap, not a complete or safe task deletion.
+    let parent = tempfile::tempdir().unwrap();
+    std::fs::set_permissions(parent.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+    let state = StateConfig::resolve(Some(parent.path()), None)
+        .unwrap()
+        .open()
+        .unwrap();
+    let journal = Journal::start(state.journal_directory(), 8).unwrap();
+    let owner = TaskAuthority::new(&journal).trusted_user();
+    owner
+        .create_task(contract("owned"))
+        .unwrap()
+        .blocking_recv()
+        .unwrap();
+    let lease = state.acquire_task(&TaskId::from("owned")).unwrap();
+    let store = ArtifactStore::open(&lease).unwrap();
+    let first = store
+        .stage(ArtifactPersistence::Public, b"synthetic")
+        .unwrap();
+    journal
+        .client()
+        .delete_task(TaskId::from("owned"))
+        .unwrap()
+        .blocking_recv()
+        .unwrap();
+    assert_eq!(store.readback(&first).unwrap(), b"synthetic");
+    let second = store
+        .stage(ArtifactPersistence::Public, b"after sql deletion")
+        .unwrap();
+    assert_eq!(store.readback(&second).unwrap(), b"after sql deletion");
+    journal.close().unwrap();
 }
 
 #[test]
