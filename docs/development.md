@@ -44,6 +44,10 @@ Metadata must contain exactly aero-core, aero-cdp, aero-perception, aero-executo
 
 No provider, external database server, keyring, desktop GUI, model download, real browsing account, or Chromium launch is needed. B04 builds bundled SQLite through rusqlite 0.41.0 (default features disabled), using the existing C toolchain; journal tests create disposable synthetic databases. Doctor tests use explicitly synthetic executable fixtures and do not prove a browser sandbox.
 
+### C01/C02 transport tests
+
+`cargo test -p aero-cdp --test transport --locked` runs 17 tests against an in-process WebSocket peer bound to `127.0.0.1:0`; no browser or network beyond loopback is used. aero-cdp depends on tokio-tungstenite 0.30.0 with default features disabled (`connect` only, no TLS) and futures-util 0.3.34. Passing these tests proves transport routing and cleanup, not Chromium reachability or sandboxing.
+
 ### B04 storage prerequisites
 
 `cargo test -p aero-agent --test journal --locked` exercises the initial schema and private opener. It requires Linux procfs and a local filesystem supporting SQLite WAL, advisory locks, ownership and Unix permission bits. Supply an absolute dedicated path; only its final missing directory is created. Existing directories/files must already be owned and private (0700/0600). Symlinks, hardlinks, foreign owners, writable nonsticky ancestors and unsupported schemas fail closed; the opener does not chmod existing data. Do not point it at Windows-mounted, network or arbitrary shared storage and assume equivalent guarantees. B06's config module now supplies private XDG/task paths; Store alone is not task-controller authority. The lock coordinates cooperating Store instances, not hostile same-UID/root SQL writers.

@@ -7,3 +7,10 @@ publish.workspace = true
 
 [dependencies]
 aero-core.workspace = true
+futures-util.workspace = true
+serde_json.workspace = true
+tokio = { workspace = true, features = ["macros", "net", "rt", "sync", "time"] }
+tokio-tungstenite.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "net", "rt", "rt-multi-thread", "sync", "time"] }
