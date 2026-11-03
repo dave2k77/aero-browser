@@ -171,6 +171,7 @@ The pre-N01 audit reproduced/fixed BUG-001 and three additional CLI issues below
 | DEC-010 | P0 | accepted | Project owner | Unshipped v1 journal schema is edited in place; development databases are disposable and older ones are refused; preserving migrations start at the first release | N16/N17/N18 storage changes |
 | DEC-011 | P0 | accepted | Project owner | Deletion tombstone keeps only the hashed task key, state and timestamps, permanently; holds cannot stop a deletion once it has started | N16 durable coordinated deletion |
 | DEC-012 | P1 | pending | Project owner | Confirm or revise the report claims format implemented as the default in CH-7 (one `aero-claims` JSON block per Markdown report; null evidence = unknown) | Agent report generation (E-series) and the G1 workflow |
+| DEC-013 | P1 | pending | Project owner | Confirm or revise the planner-facing observation text format implemented as the default in D01 (one escaped line per node, `@e<n>` handles, priority truncation with an explicit `[omitted …]` line) | Planner prompt construction (E03/E05) and the G1 workflow |
 
 #### DEC-001 — Development setup authorization
 
@@ -225,6 +226,10 @@ Accepted 2026-11-02: the owner chose “Tombstone keeps only the hashed task key
 #### DEC-012 — Report claims and evidence citation format
 
 Pending owner confirmation. The specification requires report fields/claims to link to captured evidence and unsupported assertions to be marked unknown, but defines no format. CH-7 implements a conservative default so evidence coverage can be machine-checked: a Markdown report output carries exactly one fenced block with info string `aero-claims` containing strict JSON `{"schema_version":1,"claims":[{"entity","field","value","evidence_id"}]}`, where `evidence_id` is a committed capture of the same run or `null` for an explicit unknown. The completion gate loads each cited capture itself and requires exact entity/field/value agreement; any contradicted claim fails, otherwise the matched share must reach the contract's `required_fraction`. Prose outside the block is not verified. Revising this format is cheap while nothing generates reports yet; it must be settled before E-series report generation and the G1 workflow.
+
+#### DEC-013 — Planner-facing observation text format
+
+Pending owner confirmation. The plan fixes the observation's limits (16 KiB UTF-8, names ≤256 Unicode scalar values, focus/dialog/actionable/nearby priority, explicit truncation) and that handles are opaque observation-scoped strings, but defines no text format. D01 implements a conservative default in `crates/aero-perception/src/observation.rs`: one line per rendered node, two spaces of indentation per rendered ancestor; controls as `@e<n> <role> "<name>"` plus ` value="…"` and fixed-order state flags; context as `heading <level> "…"`, `cell "…"`, `text "…"` and similar; structure as bare `table`, `row`, `list` or `listitem`. Every page-supplied string is quoted, with quotes, backslashes and control, line-separator, bidirectional and zero-width characters escaped, so page text can neither start a line nor forge a handle. Cut names and values are flagged `truncated`, and a final `[omitted N controls and M other lines]` line appears whenever anything was dropped. Handles are assigned after selection, in document order, so the text and the handle map always agree. Revising this is cheap while no planner consumes it; it must be settled before E03/E05 prompt construction.
 
 ## 5. Initial design hazards already covered by the plan
 

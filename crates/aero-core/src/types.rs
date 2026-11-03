@@ -120,6 +120,43 @@ viewport_point!(
     "A screenshot-pixel point; fractional values are preserved."
 );
 
+/// An observation-scoped element handle, written `@e<n>` (D01).
+///
+/// Parsing proves only the shape. Whether a handle was issued by a given
+/// observation, and is still fresh, is the observation's handle map's and the
+/// executor's concern.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct ElementHandle(u32);
+
+impl ElementHandle {
+    pub fn new(index: u32) -> Self {
+        Self(index)
+    }
+
+    pub fn index(self) -> u32 {
+        self.0
+    }
+
+    /// Accept exactly `@e` followed by a canonical decimal `u32` (no sign,
+    /// no leading zeros, no surrounding whitespace).
+    pub fn parse(text: &str) -> Option<Self> {
+        let digits = text.strip_prefix("@e")?;
+        let canonical = !digits.is_empty()
+            && digits.bytes().all(|b| b.is_ascii_digit())
+            && (digits == "0" || !digits.starts_with('0'));
+        if !canonical {
+            return None;
+        }
+        digits.parse().ok().map(Self)
+    }
+}
+
+impl std::fmt::Display for ElementHandle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "@e{}", self.0)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -332,6 +369,31 @@ mod tests {
             },
         ] {
             assert!(FrameLocalRect::new(rect).is_none(), "{rect:?}");
+        }
+    }
+
+    #[test]
+    fn element_handle_shape() {
+        for (text, index) in [("@e0", 0), ("@e7", 7), ("@e4294967295", u32::MAX)] {
+            let handle = ElementHandle::parse(text).expect(text);
+            assert_eq!(handle.index(), index);
+            assert_eq!(handle.to_string(), text);
+        }
+        for bad in [
+            "",
+            "@e",
+            "e1",
+            "@E1",
+            "@e01",
+            "@e-1",
+            "@e+1",
+            " @e1",
+            "@e1 ",
+            "@e1x",
+            "@e4294967296",
+            "@e١",
+        ] {
+            assert_eq!(ElementHandle::parse(bad), None, "{bad:?}");
         }
     }
 }

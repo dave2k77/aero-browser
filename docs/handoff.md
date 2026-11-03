@@ -1,8 +1,35 @@
 # AeroBrowser — implementation handoff
 
-Document-set revision: 2.28. Current checkpoint: chain batch CH-13 (C06) below, uncommitted and ready for review. Everything through bcc9961 (CH-12, C05) is committed and pushed. Prior checkpoints below are historical where their next actions or test counts differ.
+Document-set revision: 2.30. Current checkpoint: chain batch CH-14 (D01) below, uncommitted and ready for review. Everything through 8f7fb54 (CH-13, C06) is committed and pushed. Prior checkpoints below are historical where their next actions or test counts differ.
 
-## Current chain batch CH-13 checkpoint
+## Current chain batch CH-14 checkpoint
+
+The owner said “yes, go ahead” to committing C06 and starting D01 with a plan first. C06 was committed as 8f7fb54 and pushed (remote main read back at the same SHA). With C01–C07 committed, Batch C is complete. The owner then approved the D01 plan with the provisional DEC-013 text format.
+
+CH-14 — D01 bounded semantic observations, uncommitted, unit evidence (pure code, no browser):
+
+- `crates/aero-core/src/types.rs`: `ElementHandle` — canonical `@e<n>` (`u32`, no sign, leading zeros or whitespace); parsing proves shape only.
+- `crates/aero-perception/src/axtree.rs`: `parse_tree` reads one frame's `getFullAXTree` reply. Strict shapes (non-scalar values, non-boolean flags, non-integer level, non-string name are errors), at most `MAX_AX_NODES` = 50,000 nodes, duplicate node IDs, a missing parentless `RootWebArea`, a `childIds` entry naming no node and a node reachable twice are errors. An explicit stack walks DOM pre-order; ignored wrappers are skipped with their children re-parented to the nearest kept ancestor; `InlineTextBox` is dropped.
+- `crates/aero-perception/src/observation.rs`: `observe(ObservationInput)` merges frames at `FrameLink { parent, iframe_backend_node_id, child }` (≤ `MAX_FRAMES` = 64 and ≤ `MAX_OBSERVED_NODES` = 200,000; unknown root, duplicate frame, link to an unknown frame, a frame linked twice or as root, and one iframe linked twice are errors; unlinked frames are left out and not listed). Classification: controls get handles only with a DOM node and outside a native select (whose options are context); `StaticText` is dropped under a control, a named heading/cell or a label; headings keep their level; tables, rows, lists, dialogs, named images and iframes are rendered as context or structure; other roles are walked through. Rendering, selection and handle assignment follow DEC-013 (see the tracker): escaped quoted strings, 256-scalar cuts flagged `truncated`, 16 KiB with a 96-byte trailer reserve, priority focus/dialog → controls → nearby context (neighbours and the nearest heading above a control) → rest, `[omitted N controls and M other lines]`, handles assigned after selection so text and map agree. `HandleMap::resolve` rejects malformed handles, another observation, another runtime epoch and unissued handles; targets carry frame, document epoch, backend node ID, role and the full (uncut) name.
+- Tests: `element_handle_shape` and nine `axtree_*` tests (three parser, six observation). All were observed red against stubs; the observation tests first failed only because the parser was a stub, so the parser was implemented first and they were observed failing against their own `observe` stub before it was implemented. Mutation pass (`/home/davia/.hermes/cache/scratch/aero-d01-mutants.py`): 27 defects. The first full run caught 23; the four misses were real test gaps (short focus/dialog lines squeezed into leftover space, a direct child hid the dialog-ancestry defect, page order hid the nearby-context priority, and handle-width slack hid the trailer reserve), fixed by 128-byte lines, a wrapper inside the dialog, context placed after 400 paragraphs and a 300-line text-only case. Rerun: 27/27 caught, sources verified restored.
+- Process note: two earlier mutation runs were killed from outside (tool time limit, then an outer `timeout`) during a mutant that loops forever on a cyclic tree; the kill skipped cleanup and left a mutant in `types.rs` and then `axtree.rs`, both restored from pre-run backups and verified by `diff`. The script now runs each test in its own process group with a 120 s deadline and an 8 GiB address-space limit, restores on SIGTERM/SIGINT/SIGHUP, and refuses to start while an interrupted run's marker exists.
+- `Cargo.lock`: aero-perception gains its `serde_json` dependency line; no new packages.
+
+Limits: no real `RuntimeEpoch`/`DocumentEpoch` producer yet (callers supply them; D02/D04); per-frame tree fetching and iframe-to-frame linking are D04/D05; no browser-backed observation test yet (the spike below shaped the parser); DEC-013 is pending owner confirmation; nothing feeds observations into evidence capture yet.
+
+Next by plan order: D02 grounded click (`click_has_one_event_sequence`, `scroll_remeasures_target`, `stale_observation_cannot_click`, `occluded_target_is_rejected`).
+
+### D01 spike findings
+
+Spike (throwaway test and fixture, deleted in the same command; design input, not test evidence) — `Accessibility.getFullAXTree` from Chrome 156 on a fixture with heading, paragraph+link, labelled/disabled/readonly inputs, a native and a `role=button` div, an `aria-hidden` and a `display:none` block, a table, a select, a checkbox and a same-origin iframe:
+
+- Nodes arrive breadth-first, not in DOM order; DOM order must come from walking `childIds` from the `RootWebArea`.
+- `aria-hidden`/`display:none` content is absent; layout wrappers are `ignored: true` (`role: none`, reason `uninteresting`) but still carry `childIds` that must be walked through.
+- `InlineTextBox` children have negative node IDs and no `backendDOMNodeId`; every `StaticText` repeats the text of its heading/link/button/cell parent, so naive output doubles every label.
+- States come as properties: `disabled`, `readonly`, `checked` ("true"/"false"/"mixed", a string), `level`, `selected`, `expanded`, `focusable`, `focused`, `required`, `settable`, `url`; form values come in `value` (textbox `"v"`, combobox `"B"`).
+- Roles include Chromium-internal ones (`LabelText`, `generic`, `MenuListPopup`, `Iframe`, `RootWebArea`). The iframe appears as an `Iframe` leaf with no children: each frame's tree must be fetched separately (`frameId` parameter), so the frame merge is a real step.
+
+## Previous chain batch CH-13 checkpoint (committed 8f7fb54)
 
 The owner said “yes, go ahead” to committing C05 and starting C06. C05 was committed as bcc9961 and pushed (remote main read back at the same SHA).
 
@@ -18,7 +45,7 @@ CH-13 — C06 bounded page evaluation and lifecycle waits, uncommitted, WSL2 evi
 
 Limits: WSL2 only (ENV-004). Blocked pages (DNS/policy blocks) beyond a refused connection are not exercised separately; history (`pushState`) SPA changes are not driven by `navigate_and_wait` (it reports fragment navigations it initiates); cross-document navigations started by the page itself are not awaited; no frames/OOPIF (D04). Downloads and dialogs during navigation are out of scope here.
 
-Next by plan order: D01 observation capture.
+Next by plan order: D01 observation capture (planned in the current checkpoint).
 
 ## Previous chain batch CH-12 checkpoint (committed bcc9961)
 

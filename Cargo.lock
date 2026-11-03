@@ -67,6 +67,7 @@ version = "0.1.0"
 dependencies = [
  "aero-cdp",
  "aero-core",
+ "serde_json",
 ]
 
 [[package]]
