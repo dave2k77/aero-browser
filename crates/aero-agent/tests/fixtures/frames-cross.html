@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Cross document</title>
+</head>
+<body>
+<button>Cross button</button>
+<script>
+// Back to the top page's site: a nested out-of-process frame.
+const frame = document.createElement("iframe");
+frame.id = "leaf";
+frame.title = "Leaf frame";
+frame.style = "width:300px;height:100px";
+frame.src = `http://127.0.0.1:${location.port}/frames-leaf.html`;
+document.body.appendChild(frame);
+</script>
+</body>
+</html>

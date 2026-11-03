@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>AeroBrowser cross-site frames fixture</title>
+</head>
+<body>
+<button>Top button</button>
+<div id="slot"></div>
+<script>
+// Cross-site: same port, other host name (localhost vs 127.0.0.1).
+const frame = document.createElement("iframe");
+frame.id = "cross";
+frame.title = "Cross frame";
+frame.style = "width:420px;height:260px";
+frame.src = `http://localhost:${location.port}/frames-cross.html`;
+document.getElementById("slot").appendChild(frame);
+// A dedicated worker: not an iframe, so never attached.
+new Worker(URL.createObjectURL(new Blob(["setInterval(() => {}, 1000)"], { type: "text/javascript" })));
+</script>
+</body>
+</html>

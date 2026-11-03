@@ -12,6 +12,7 @@ use serde_json::{Value, json};
 use tokio::time::Instant;
 
 use crate::evaluate::{EvaluateError, EvaluateOptions};
+use crate::frame_manager::{FrameInfo, FrameManager, FrameSnapshot};
 use crate::runtime::RuntimeError;
 use crate::target_registry::{CALL, TargetRegistryHandle};
 use crate::{CdpConnection, CdpError, CdpEvent, EventStream};
@@ -63,6 +64,7 @@ pub struct Page {
     registry: TargetRegistryHandle,
     target: TargetId,
     session: CdpSessionId,
+    frames: FrameManager,
 }
 
 impl Page {
@@ -71,13 +73,122 @@ impl Page {
         registry: TargetRegistryHandle,
         target: TargetId,
         session: CdpSessionId,
+        frames: FrameManager,
     ) -> Self {
         Self {
             connection,
             registry,
             target,
             session,
+            frames,
         }
+    }
+
+    /// The page's frames (D04), or [`RuntimeError::FramesUnknown`] while the
+    /// graph is being rebuilt.
+    pub fn frames(&self) -> Result<FrameSnapshot, RuntimeError> {
+        self.frames.snapshot().ok_or(RuntimeError::FramesUnknown)
+    }
+
+    /// Send `method` to the session that owns `frame`. Fails with
+    /// [`RuntimeError::FrameGone`] for an unknown frame and
+    /// [`RuntimeError::Detached`] once that session has ended.
+    pub async fn frame_call(
+        &self,
+        frame: &FrameId,
+        method: &str,
+        params: Value,
+    ) -> Result<Value, RuntimeError> {
+        let info = self.frame_info(frame)?;
+        self.session_call(&info.session, method, params).await
+    }
+
+    /// `frame`'s accessibility tree, from the session that owns it (a
+    /// session's root frame is that session's whole tree; other frames are
+    /// selected by ID).
+    pub async fn frame_ax_tree(&self, frame: &FrameId) -> Result<Value, RuntimeError> {
+        let info = self.frame_info(frame)?;
+        let params = if info.local_root {
+            json!({})
+        } else {
+            json!({ "frameId": frame.as_str() })
+        };
+        self.session_call(&info.session, "Accessibility.getFullAXTree", params)
+            .await
+    }
+
+    /// The backend node of the `<iframe>` element that owns `frame`, read in
+    /// its parent frame's session.
+    pub async fn frame_owner(&self, frame: &FrameId) -> Result<i64, RuntimeError> {
+        let parent = self
+            .frame_info(frame)?
+            .parent
+            .ok_or(RuntimeError::FrameGone)?;
+        let parent = self.frame_info(&parent)?;
+        let reply = self
+            .session_call(
+                &parent.session,
+                "DOM.getFrameOwner",
+                json!({ "frameId": frame.as_str() }),
+            )
+            .await?;
+        reply["backendNodeId"].as_i64().ok_or_else(|| {
+            RuntimeError::Cdp(CdpError::InvalidMessage(
+                "frame owner without a node".into(),
+            ))
+        })
+    }
+
+    /// Rebuild the frame graph (what missed events trigger), re-attaching
+    /// every OOPIF with a new session.
+    pub async fn resync_frames(&self) -> Result<(), RuntimeError> {
+        if !self.registry.owns(&self.target, &self.session) {
+            return Err(RuntimeError::Detached);
+        }
+        self.frames.resync().await.map_err(RuntimeError::Cdp)
+    }
+
+    fn frame_info(&self, frame: &FrameId) -> Result<FrameInfo, RuntimeError> {
+        self.frames()?
+            .frames
+            .into_iter()
+            .find(|info| &info.frame == frame)
+            .ok_or(RuntimeError::FrameGone)
+    }
+
+    /// Call on the page's session or one of its child frame sessions. A
+    /// browser answers a call on an ended session with an unsessioned error
+    /// (or not at all), so the call races the session's end.
+    async fn session_call(
+        &self,
+        session: &CdpSessionId,
+        method: &str,
+        params: Value,
+    ) -> Result<Value, RuntimeError> {
+        if session == &self.session {
+            return self.call(method, params).await;
+        }
+        if !self.frames.owns_session(session) {
+            return Err(RuntimeError::Detached);
+        }
+        let outcome = tokio::select! {
+            reply = self.connection.call(method, params, Some(session), CALL) => Some(reply),
+            () = self.frames.until_ended(session) => None,
+            () = self.registry.until_detached(&self.target, &self.session) => None,
+        };
+        match outcome {
+            Some(Ok(reply)) => Ok(reply),
+            Some(Err(_)) | None if !self.frames.owns_session(session) => {
+                Err(RuntimeError::Detached)
+            }
+            Some(Err(error)) => Err(error.into()),
+            None => Err(RuntimeError::Detached),
+        }
+    }
+
+    /// Times the frame graph was rebuilt.
+    pub fn frame_resyncs(&self) -> u64 {
+        self.frames.resyncs()
     }
 
     pub fn target_id(&self) -> &TargetId {

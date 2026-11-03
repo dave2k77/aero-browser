@@ -1260,3 +1260,465 @@ async fn select_and_checkbox_are_verified() {
     fixture.shutdown().await.expect("teardown");
     assert_eq!(support::sandbox_processes(), Vec::<u32>::new());
 }
+
+/// D04 helpers: frame fixtures, frame lookups and per-frame evaluation.
+#[cfg(feature = "browser-tests")]
+mod frames {
+    use std::time::Duration;
+
+    use aero_cdp::frame_manager::{FrameInfo, FrameSnapshot};
+    use aero_cdp::page::{NavigationLimits, Page};
+    use aero_core::ids::{FrameId, ObservationId};
+    use aero_perception::observation::{HandleTarget, Observation, observe_page};
+    use serde_json::{Value, json};
+
+    use crate::support::{self, Fixture};
+
+    pub async fn open(fixture: &Fixture, name: &str) -> Page {
+        let runtime = fixture.runtime();
+        let tab = runtime.wait_for_tab(Duration::from_secs(10)).await.unwrap();
+        let page = runtime.attach(&tab.target_id).await.unwrap();
+        page.navigate_and_wait(&fixture.server.url(name), &NavigationLimits::default())
+            .await
+            .expect("frames fixture loads");
+        page
+    }
+
+    /// The frame graph once every listed path has a frame with a document
+    /// and a default context.
+    pub async fn settled(page: &Page, paths: &[&str]) -> FrameSnapshot {
+        let snapshot = support::eventually(Duration::from_secs(10), || async {
+            let snapshot = page.frames().ok()?;
+            let mut found = 0;
+            for info in &snapshot.frames {
+                if info.document.is_none() || info.context.is_none() {
+                    return None;
+                }
+                if let Some(path) = path_of(page, info).await
+                    && paths.contains(&path.as_str())
+                {
+                    found += 1;
+                }
+            }
+            (found == paths.len() && snapshot.frames.len() == paths.len()).then_some(snapshot)
+        })
+        .await;
+        snapshot.unwrap_or_else(|| panic!("frames {paths:?} did not settle: {:?}", page.frames()))
+    }
+
+    /// `location.pathname` evaluated in the frame's own default context.
+    pub async fn path_of(page: &Page, info: &FrameInfo) -> Option<String> {
+        Some(
+            evaluate_in(page, info, "location.pathname")
+                .await
+                .ok()?
+                .as_str()?
+                .to_owned(),
+        )
+    }
+
+    pub async fn evaluate_in(
+        page: &Page,
+        info: &FrameInfo,
+        expression: &str,
+    ) -> Result<Value, String> {
+        let context = info.context.as_ref().ok_or("no context")?;
+        let reply = page
+            .frame_call(
+                &info.frame,
+                "Runtime.evaluate",
+                json!({ "expression": expression, "contextId": context.id, "returnByValue": true }),
+            )
+            .await
+            .map_err(|error| format!("{error:?}"))?;
+        Ok(reply["result"]["value"].clone())
+    }
+
+    pub async fn by_path<'a>(
+        page: &Page,
+        snapshot: &'a FrameSnapshot,
+        path: &str,
+    ) -> &'a FrameInfo {
+        for info in &snapshot.frames {
+            if path_of(page, info).await.as_deref() == Some(path) {
+                return info;
+            }
+        }
+        panic!("no frame at {path}");
+    }
+
+    pub async fn observe(page: &Page, id: &str) -> Observation {
+        let runtime = aero_core::ids::RuntimeEpoch::from("epoch-1");
+        support::eventually(Duration::from_secs(5), || async {
+            observe_page(page, ObservationId::from(id), runtime.clone())
+                .await
+                .ok()
+        })
+        .await
+        .expect("observation")
+    }
+
+    /// The handle target of the one button with this name.
+    pub fn button<'a>(observation: &'a Observation, name: &str) -> (String, &'a HandleTarget) {
+        let found: Vec<_> = observation
+            .handles()
+            .iter()
+            .filter(|(_, target)| target.role == "button" && target.name == name)
+            .collect();
+        assert_eq!(
+            found.len(),
+            1,
+            "one button {name:?} in:\n{}",
+            observation.text()
+        );
+        (found[0].0.to_string(), found[0].1)
+    }
+
+    pub fn frame_ids(snapshot: &FrameSnapshot) -> Vec<FrameId> {
+        snapshot
+            .frames
+            .iter()
+            .map(|info| info.frame.clone())
+            .collect()
+    }
+}
+
+/// D04: a same-process iframe is tracked, observed under its `<iframe>` and
+/// evaluated in its own context; navigating it replaces its document, after
+/// which its old nodes and handles fail.
+#[cfg(feature = "browser-tests")]
+#[tokio::test]
+async fn same_process_frame_is_observable() {
+    use aero_cdp::runtime::RuntimeError;
+    use aero_executor::target::GroundingError;
+    use serde_json::json;
+
+    let _serial = support::serial().await;
+    let fixture = support::Fixture::start()
+        .await
+        .expect("required native browser fixture failed to start");
+    let runtime = fixture.runtime();
+    let page = frames::open(&fixture, "frames.html").await;
+    let snapshot = frames::settled(&page, &["/frames.html", "/frames-inner.html"]).await;
+    let main = frames::by_path(&page, &snapshot, "/frames.html")
+        .await
+        .clone();
+    let inner = frames::by_path(&page, &snapshot, "/frames-inner.html")
+        .await
+        .clone();
+    assert_eq!(main.parent, None);
+    assert_eq!(inner.parent.as_ref(), Some(&main.frame));
+    assert_eq!(snapshot.frames[0].frame, main.frame, "parents first");
+    // Same process: both frames belong to the page's own session.
+    assert_eq!(
+        (&main.session, &inner.session),
+        (page.session(), page.session())
+    );
+    assert!(main.local_root && !inner.local_root);
+    assert_ne!(main.frame, inner.frame);
+    assert_ne!(
+        main.context, inner.context,
+        "each frame has its own context"
+    );
+    assert_eq!(
+        page.main_frame().await.unwrap().document,
+        main.document.clone().unwrap()
+    );
+
+    // The observation shows the inner document under its iframe, with the
+    // handle bound to the inner frame and document.
+    let observation = frames::observe(&page, "frames-1").await;
+    assert!(
+        observation
+            .text()
+            .contains("iframe \"Inner frame\"\n  @e1 button \"Inner button\"\n"),
+        "{}",
+        observation.text()
+    );
+    let (handle, target) = frames::button(&observation, "Inner button");
+    assert_eq!(target.frame, inner.frame);
+    assert_eq!(Some(&target.document), inner.document.as_ref());
+    let old_node = target.backend_node_id;
+    assert!(
+        page.frame_call(
+            &inner.frame,
+            "DOM.resolveNode",
+            json!({ "backendNodeId": old_node })
+        )
+        .await
+        .is_ok()
+    );
+    // Acting inside frames is D05: refused before any input.
+    assert_eq!(
+        aero_executor::click_handle(
+            &page,
+            observation.handles(),
+            observation.id(),
+            runtime.epoch(),
+            &handle
+        )
+        .await
+        .err()
+        .map(|error| format!("{error:?}")),
+        Some(format!(
+            "{:?}",
+            aero_executor::ClickError::Grounding(GroundingError::UnsupportedFrame)
+        ))
+    );
+
+    // Navigate only the iframe.
+    page.evaluate("document.getElementById('inner').src = 'frames-inner2.html'; 1")
+        .await
+        .unwrap();
+    let after = frames::settled(&page, &["/frames.html", "/frames-inner2.html"]).await;
+    let inner2 = frames::by_path(&page, &after, "/frames-inner2.html").await;
+    assert_eq!(inner2.frame, inner.frame, "same frame, new document");
+    assert_ne!(inner2.document, inner.document);
+    assert_eq!(
+        frames::by_path(&page, &after, "/frames.html")
+            .await
+            .document,
+        main.document
+    );
+    assert!(after.version > snapshot.version);
+    let error = page
+        .frame_call(
+            &inner.frame,
+            "DOM.resolveNode",
+            json!({ "backendNodeId": old_node }),
+        )
+        .await
+        .expect_err("old node");
+    assert!(
+        format!("{error:?}").contains("does not belong to the document"),
+        "{error:?}"
+    );
+    let observation = frames::observe(&page, "frames-2").await;
+    assert!(
+        observation.text().contains("Second inner button"),
+        "{}",
+        observation.text()
+    );
+    assert!(
+        !observation.text().contains("\"Inner button\""),
+        "{}",
+        observation.text()
+    );
+    assert_eq!(
+        frames::button(&observation, "Second inner button")
+            .1
+            .document,
+        inner2.document.clone().unwrap()
+    );
+
+    // Unknown frames are refused.
+    assert_eq!(
+        page.frame_call(
+            &aero_core::ids::FrameId::from("NOPE"),
+            "DOM.getDocument",
+            json!({})
+        )
+        .await,
+        Err(RuntimeError::FrameGone)
+    );
+
+    drop(page);
+    fixture.shutdown().await.expect("teardown");
+    assert_eq!(support::sandbox_processes(), Vec::<u32>::new());
+}
+
+/// D04: a cross-site iframe and the nested frame inside it are attached as
+/// out-of-process frames with their own sessions and contexts, observed in
+/// place, survive a full rebuild, and disappear with their sessions when the
+/// outer iframe is removed. Workers are never attached.
+#[cfg(feature = "browser-tests")]
+#[tokio::test]
+async fn nested_oopif_attaches_and_detaches() {
+    use std::time::{Duration, Instant};
+
+    use aero_cdp::runtime::RuntimeError;
+    use aero_cdp::target_registry::TargetKind;
+    use serde_json::json;
+
+    let _serial = support::serial().await;
+    let fixture = support::Fixture::start()
+        .await
+        .expect("required native browser fixture failed to start");
+    let runtime = fixture.runtime();
+    let mut events = fixture.cdp().subscribe();
+    let page = frames::open(&fixture, "frames-oopif.html").await;
+    let paths = [
+        "/frames-oopif.html",
+        "/frames-cross.html",
+        "/frames-leaf.html",
+    ];
+    let snapshot = frames::settled(&page, &paths).await;
+    // Only iframes were ever auto-attached (the worker never was, even
+    // briefly).
+    let mut attached = Vec::new();
+    while let Ok(event) = tokio::time::timeout(Duration::from_millis(100), events.recv()).await {
+        let event = event.expect("no missed events");
+        if event.method == "Target.attachedToTarget" && event.session_id.is_some() {
+            attached.push(
+                event.params["targetInfo"]["type"]
+                    .as_str()
+                    .unwrap_or("")
+                    .to_owned(),
+            );
+        }
+    }
+    assert_eq!(attached, ["iframe", "iframe"]);
+    let main = frames::by_path(&page, &snapshot, paths[0]).await.clone();
+    let cross = frames::by_path(&page, &snapshot, paths[1]).await.clone();
+    let leaf = frames::by_path(&page, &snapshot, paths[2]).await.clone();
+    assert_eq!(cross.parent.as_ref(), Some(&main.frame));
+    assert_eq!(leaf.parent.as_ref(), Some(&cross.frame));
+    assert_eq!(
+        frames::frame_ids(&snapshot),
+        [main.frame.clone(), cross.frame.clone(), leaf.frame.clone()]
+    );
+    // Three sessions, three contexts, all distinct; each OOPIF is its
+    // session's root.
+    assert_eq!(&main.session, page.session());
+    assert!(
+        cross.session != main.session
+            && leaf.session != main.session
+            && leaf.session != cross.session
+    );
+    assert!(cross.local_root && leaf.local_root);
+    let contexts: std::collections::HashSet<_> = snapshot
+        .frames
+        .iter()
+        .map(|info| info.context.clone())
+        .collect();
+    assert_eq!(contexts.len(), 3);
+    let port = fixture.server.address().port();
+    assert_eq!(
+        frames::evaluate_in(&page, &cross, "location.host").await,
+        Ok(json!(format!("localhost:{port}")))
+    );
+    assert_eq!(
+        frames::evaluate_in(&page, &leaf, "location.host").await,
+        Ok(json!(format!("127.0.0.1:{port}")))
+    );
+    // The worker exists but was never attached (its URL may still be empty;
+    // the extension service workers are the browser's own).
+    let worker = support::eventually(Duration::from_secs(5), || async {
+        runtime.targets().into_iter().find(|target| {
+            target.kind == TargetKind::Worker && !target.url.starts_with("chrome-extension://")
+        })
+    })
+    .await
+    .expect("dedicated worker target");
+    assert!(!worker.attached, "{worker:?}");
+
+    // Observed in place: each button under its own iframe, bound to its frame.
+    let observation = frames::observe(&page, "oopif-1").await;
+    let text = observation.text();
+    assert!(
+        text.contains("iframe \"Cross frame\"\n  @e1 button \"Cross button\"\n  iframe \"Leaf frame\"\n    @e2 button \"Leaf button\"\n"),
+        "{text}"
+    );
+    assert_eq!(
+        frames::button(&observation, "Cross button").1.frame,
+        cross.frame
+    );
+    assert_eq!(
+        frames::button(&observation, "Leaf button").1.frame,
+        leaf.frame
+    );
+    // The leaf's owner is the `<iframe id="leaf">` element in the cross document.
+    let owner = page
+        .frame_owner(&leaf.frame)
+        .await
+        .expect("owner of the leaf");
+    let described = page
+        .frame_call(
+            &cross.frame,
+            "DOM.describeNode",
+            json!({ "backendNodeId": owner }),
+        )
+        .await
+        .expect("owner lives in the cross document");
+    assert_eq!(described["node"]["nodeName"], "IFRAME");
+    assert!(
+        described["node"]["attributes"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("leaf")),
+        "{described}"
+    );
+
+    // A rebuild re-attaches both OOPIFs with new sessions; the old sessions
+    // are no longer ours and the graph is otherwise unchanged.
+    page.resync_frames().await.expect("rebuild");
+    assert_eq!(page.frame_resyncs(), 1);
+    let rebuilt = frames::settled(&page, &paths).await;
+    assert_eq!(frames::frame_ids(&rebuilt), frames::frame_ids(&snapshot));
+    for (old, new) in snapshot.frames.iter().zip(&rebuilt.frames) {
+        assert_eq!(old.document, new.document);
+    }
+    let cross2 = frames::by_path(&page, &rebuilt, paths[1]).await.clone();
+    assert_ne!(cross2.session, cross.session);
+    let raw = fixture
+        .cdp()
+        .call(
+            "Runtime.evaluate",
+            json!({ "expression": "1" }),
+            Some(&cross.session),
+            Duration::from_secs(2),
+        )
+        .await;
+    assert!(raw.is_err(), "the old session has ended: {raw:?}");
+
+    // A call in flight when its frame is removed ends promptly as detached.
+    let pending = page.frame_call(
+        &cross2.frame,
+        "Runtime.evaluate",
+        json!({ "expression": "new Promise(() => {})", "awaitPromise": true,
+            "contextId": cross2.context.as_ref().unwrap().id }),
+    );
+    let remove = async {
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        page.evaluate("document.getElementById('cross').remove(); 1")
+            .await
+            .unwrap();
+    };
+    let started = Instant::now();
+    let (outcome, ()) = tokio::join!(pending, remove);
+    assert_eq!(outcome, Err(RuntimeError::Detached));
+    assert!(
+        started.elapsed() < Duration::from_secs(5),
+        "{:?}",
+        started.elapsed()
+    );
+
+    // Both frames and their sessions are gone.
+    let remaining = frames::settled(&page, &paths[..1]).await;
+    assert_eq!(
+        frames::frame_ids(&remaining),
+        std::slice::from_ref(&main.frame)
+    );
+    for gone in [&cross2.frame, &leaf.frame] {
+        assert_eq!(
+            page.frame_call(gone, "Runtime.evaluate", json!({ "expression": "1" }))
+                .await,
+            Err(RuntimeError::FrameGone)
+        );
+    }
+    let observation = frames::observe(&page, "oopif-2").await;
+    assert!(
+        !observation.text().contains("Cross button"),
+        "{}",
+        observation.text()
+    );
+    assert!(
+        !observation.text().contains("Leaf button"),
+        "{}",
+        observation.text()
+    );
+
+    drop(page);
+    fixture.shutdown().await.expect("teardown");
+    assert_eq!(support::sandbox_processes(), Vec::<u32>::new());
+}

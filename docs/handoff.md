@@ -1,8 +1,43 @@
 # AeroBrowser — implementation handoff
 
-Document-set revision: 2.33. Current checkpoint: chain batch CH-16 (D03) below, uncommitted and ready for review. Everything through 5c272d5 (CH-15, D02) is committed and pushed. Prior checkpoints below are historical where their next actions or test counts differ.
+Document-set revision: 2.35. Current checkpoint: chain batch CH-17 (D04) below, uncommitted and ready for review. Everything through d014e8c (CH-16, D03) is committed and pushed. Prior checkpoints below are historical where their next actions or test counts differ.
 
-## Current chain batch CH-16 checkpoint
+## Current chain batch CH-17 checkpoint
+
+The owner approved the D04 plan below (“yes, go ahead”), including using `DOM.getFrameOwner` for observation links in D04 and leaving coordinates, the decoy frame and input inside frames to D05. A session-lease interruption stopped the first attempt mid-implementation; the owner said “continue” and the work resumed from the uncommitted tree.
+
+CH-17 — D04 frame and execution-context identity, uncommitted, WSL2 evidence (details in the D04 ledger row):
+
+- `crates/aero-cdp/src/frame_manager.rs` (new): pure `FrameGraph` plus a per-page `FrameManager` (listener, OOPIF configuration and resume, non-iframe rejection, rebuild, auto-attach off on drop).
+- `crates/aero-cdp/src/page.rs`: `frames`, `frame_call`, `frame_ax_tree`, `frame_owner`, `resync_frames`, `frame_resyncs`; `runtime.rs`: `RuntimeError::{FrameGone, FramesUnknown}`, `attach` starts the frame manager; `target_registry.rs`: module docs on the two attachment scopes.
+- `crates/aero-perception/src/observation.rs`: multi-frame `observe_page` with `observable_frames`.
+- `crates/aero-executor/src/target.rs`: `GroundingError::UnsupportedFrame`.
+- Found while testing: Chromium rejects `Target.setAutoAttach` with a filter when disabling (“Target filter should be empty when disabling auto-attach”); the rebuild and drop paths now send no filter when disabling.
+- Tests, repeat runs and mutation results: see the D04 ledger row (6 + 1 unit tests, 2 scenarios, 15/15 repeat runs, 30/35 mutants with the survivors explained).
+
+Limits: frames without a committed document are omitted; any frame change during an observation refuses it; acting inside frames is D05; lag triggers a full rebuild; WSL2 only.
+
+Next by plan order: D05 frame owners and viewport coordinates (`two_iframes_map_to_correct_owners`, `nested_frame_coordinate_calibration`, `transformed_frame_fails_closed`).
+
+## D04 planning record
+
+The owner approved committing D03 and proceeding. D03 was committed as d014e8c and pushed (remote main read back at the same SHA).
+
+Spike (throwaway test and five fixtures, deleted afterwards; design input, not test evidence) — Chrome 156 in the Bubblewrap sandbox; a top page on `127.0.0.1` with a same-origin iframe and a cross-site iframe on `localhost` (same port) that itself embeds a `127.0.0.1` leaf iframe, plus a dedicated worker:
+
+- `localhost` and `127.0.0.1` are different sites, so the cross-site frame and the nested A→B→A leaf both became out-of-process frames (iframe targets) without extra launch flags.
+- `Target.setAutoAttach {autoAttach, waitForDebuggerOnStart, flatten, filter: [{type: "iframe"}]}` on the page session attaches each OOPIF with a child session (event `Target.attachedToTarget` on the parent's session, `waitingForDebugger: true`). Configuring the child (enable domains, set the same auto-attach recursively) and then `Runtime.runIfWaitingForDebugger` attached the nested leaf from the child session. The filter kept the dedicated worker unattached and running.
+- `Page.getFrameTree` on a session lists only that process's local frames: the top tree held the main and same-origin frames; each child session's tree was rooted at its OOPIF frame with `parentId` naming the parent frame. The parent briefly reported the OOPIF frame via `frameAttached` and then `frameDetached` with reason `swap`.
+- OOPIF target IDs equalled their frame IDs in this build; the plan forbids relying on that, so a child's frame comes from its own session's frame tree.
+- `Runtime.executionContextCreated` carries `auxData {frameId, isDefault, type}` and a `uniqueId`; numeric context IDs are per session (a child session's first context was `1`, as the top's had been), so contexts are keyed by session and ID.
+- Accessibility: the top tree's `Iframe` nodes have no children; `Accessibility.getFullAXTree {frameId}` on the top session returns a same-process child frame's tree; an OOPIF's tree comes from its own session.
+- Ownership: `DOM.getFrameOwner {frameId}` on the parent frame's session returned the exact `<iframe>` backend node for the same-process child, the OOPIF and the nested leaf (the leaf's owner only on its parent's child session, not on the top session) — exactly the D01 `FrameLink` input.
+- Navigating the same-process iframe changed only that frame's `loaderId`; its old backend node then failed with "Node with given id does not belong to the document".
+- Removing the cross-site iframe gave, deepest first, `Page.frameDetached` (reason `remove`) and `Target.detachedFromTarget` on each parent's session, then browser-level `Target.targetDestroyed`.
+- A call on an ended child session gets an unsessioned error reply, which `CdpConnection` reports as `InvalidMessage("reply from a different session")` (per request; the connection stays usable). Frame calls therefore need the same detach race as `Page` calls.
+- Turning auto-attach off detached the existing OOPIF sessions; turning it on again re-attached them with new sessions and `waitingForDebugger: false` — a full resync path after lost events.
+
+## Previous chain batch CH-16 checkpoint (committed d014e8c)
 
 The owner said “yes, go ahead” to committing D02 and starting D03. D02 was committed as 5c272d5 and pushed (remote main read back at the same SHA). D03 followed the plan row directly (no spike: it reuses D02 grounding).
 

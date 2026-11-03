@@ -10,6 +10,7 @@
 mod connection;
 mod error;
 pub mod evaluate;
+pub mod frame_manager;
 pub mod launcher;
 pub mod page;
 pub mod runtime;

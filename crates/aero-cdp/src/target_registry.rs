@@ -4,9 +4,11 @@
 //! discovery, then merges a `Target.getTargets` snapshot. An owned listener
 //! task applies browser-level `Target.*` events; a lagged subscription is
 //! resynchronized from a fresh snapshot rather than continued with a stale map.
-//! Attachment happens only through the registry (explicit, flattened, one
-//! session per target); Bubblewrap-launched Chromium is not put in auto-attach
-//! mode, so there is no second attachment authority.
+//! Tab attachment happens only through the registry (explicit, flattened,
+//! one session per target); browser-level auto-attach is never used, so there
+//! is no second attachment authority for tabs. A page's out-of-process
+//! iframes are attached through session-level auto-attach on that page's own
+//! sessions and belong to its frame manager (D04).
 //!
 //! Target IDs are never reused by a browser, so a destroyed ID is remembered
 //! and never re-added by a snapshot that was taken before the destruction.

@@ -30,9 +30,10 @@ pub struct GroundedTarget {
 #[derive(Debug, PartialEq)]
 pub enum GroundingError {
     Handle(HandleError),
-    /// The main frame navigated since the observation (or the handle belongs
-    /// to another frame).
+    /// The main frame navigated since the observation.
     StaleDocument,
+    /// The handle belongs to a child frame; acting inside frames is D05.
+    UnsupportedFrame,
     /// The node no longer exists or is no longer in the document.
     NodeGone,
     Disabled,
@@ -76,7 +77,10 @@ pub(crate) async fn ground_node(
         .resolve(observation, runtime, handle)
         .map_err(GroundingError::Handle)?;
     let main = page.main_frame().await.map_err(GroundingError::Runtime)?;
-    if main.frame != target.frame || main.document != target.document {
+    if main.frame != target.frame {
+        return Err(GroundingError::UnsupportedFrame);
+    }
+    if main.document != target.document {
         return Err(GroundingError::StaleDocument);
     }
     let backend = target.backend_node_id;

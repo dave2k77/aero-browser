@@ -23,11 +23,11 @@
 
 use std::collections::{HashMap, HashSet};
 
+use aero_cdp::frame_manager::FrameInfo;
 use aero_cdp::page::Page;
 use aero_cdp::runtime::RuntimeError;
 use aero_core::ids::{DocumentEpoch, FrameId, ObservationId, RuntimeEpoch};
 use aero_core::types::ElementHandle;
-use serde_json::json;
 
 use crate::axtree::{AxError, AxNode, AxTree, Checked};
 
@@ -262,7 +262,7 @@ pub enum PageObserveError {
     Runtime(RuntimeError),
     Tree(AxError),
     Observe(ObserveError),
-    /// The main frame's document changed while the tree was being read.
+    /// A frame, document or frame session changed while the trees were read.
     DocumentChanged,
 }
 
@@ -279,37 +279,97 @@ impl std::fmt::Display for PageObserveError {
 
 impl std::error::Error for PageObserveError {}
 
-/// Observe the page's main frame (D02; iframe trees are D04). Handles are
-/// bound to `id`, `runtime` and the main frame's current document epoch.
+/// Observe the page: the main frame and every frame below it whose
+/// document has committed (D04), each frame's tree read from the session
+/// that owns it and placed under its exact `<iframe>` (`DOM.getFrameOwner`
+/// in the parent's session). Handles are bound to `id`, `runtime` and each
+/// frame's document epoch. A frame graph change while the trees are read
+/// (navigation, attach, detach) refuses the whole observation.
 pub async fn observe_page(
     page: &Page,
     id: ObservationId,
     runtime: RuntimeEpoch,
 ) -> Result<Observation, PageObserveError> {
-    let before = page.main_frame().await.map_err(PageObserveError::Runtime)?;
-    let reply = page
-        .call("Accessibility.getFullAXTree", json!({}))
-        .await
-        .map_err(PageObserveError::Runtime)?;
-    let tree = crate::axtree::parse_tree(&reply).map_err(PageObserveError::Tree)?;
-    // A navigation between the two reads would bind the new document's nodes
-    // to the old epoch (or the reverse).
-    let after = page.main_frame().await.map_err(PageObserveError::Runtime)?;
-    if after != before {
+    let main = page.main_frame().await.map_err(PageObserveError::Runtime)?;
+    let before = page.frames().map_err(PageObserveError::Runtime)?;
+    if before
+        .frames
+        .first()
+        .map(|info| (&info.frame, info.document.as_ref()))
+        != Some((&main.frame, Some(&main.document)))
+    {
+        return Err(PageObserveError::DocumentChanged);
+    }
+    if before.frames.len() > MAX_FRAMES {
+        return Err(PageObserveError::Observe(ObserveError::TooManyFrames(
+            before.frames.len(),
+        )));
+    }
+    let mut frames = Vec::new();
+    let mut links = Vec::new();
+    for info in observable_frames(&before.frames) {
+        let Some(document) = info.document.clone() else {
+            continue;
+        };
+        let link = match &info.parent {
+            None => None,
+            Some(parent) => Some(FrameLink {
+                parent: parent.clone(),
+                iframe_backend_node_id: page
+                    .frame_owner(&info.frame)
+                    .await
+                    .map_err(PageObserveError::Runtime)?,
+                child: info.frame.clone(),
+            }),
+        };
+        let reply = page
+            .frame_ax_tree(&info.frame)
+            .await
+            .map_err(PageObserveError::Runtime)?;
+        let tree = crate::axtree::parse_tree(&reply).map_err(PageObserveError::Tree)?;
+        frames.push(FrameTree {
+            frame: info.frame.clone(),
+            document,
+            tree,
+        });
+        links.extend(link);
+    }
+    // A change between the reads would bind one document's nodes to
+    // another's epoch, or place a frame under the wrong iframe.
+    let after = page.frames().map_err(PageObserveError::Runtime)?;
+    if after.version != before.version
+        || page.main_frame().await.map_err(PageObserveError::Runtime)? != main
+    {
         return Err(PageObserveError::DocumentChanged);
     }
     observe(ObservationInput {
         id,
         runtime,
-        root: before.frame.clone(),
-        frames: vec![FrameTree {
-            frame: before.frame,
-            document: before.document,
-            tree,
-        }],
-        links: Vec::new(),
+        root: main.frame,
+        frames,
+        links,
     })
     .map_err(PageObserveError::Observe)
+}
+
+/// The frames an observation reads, parents first: every frame whose
+/// document has committed and whose parent is read too. A frame without a
+/// document (not yet committed, or moving between processes) stays a leaf
+/// iframe, and so does everything below it.
+fn observable_frames(frames: &[FrameInfo]) -> Vec<&FrameInfo> {
+    let mut chosen: Vec<&FrameInfo> = Vec::new();
+    for info in frames {
+        if info.document.is_none() {
+            continue;
+        }
+        if let Some(parent) = &info.parent
+            && !chosen.iter().any(|read| &read.frame == parent)
+        {
+            continue;
+        }
+        chosen.push(info);
+    }
+    chosen
 }
 
 /// Build an observation from frame trees.
@@ -1221,5 +1281,35 @@ mod tests {
             .err(),
             Some(ObserveError::TooManyFrames(MAX_FRAMES + 1))
         );
+    }
+
+    #[test]
+    fn only_committed_frames_under_read_parents_are_observed() {
+        use aero_cdp::frame_manager::FrameInfo;
+        use aero_core::ids::CdpSessionId;
+        let info = |frame: &str, parent: Option<&str>, document: Option<&str>| FrameInfo {
+            frame: FrameId::from(frame),
+            parent: parent.map(FrameId::from),
+            document: document.map(DocumentEpoch::from),
+            session: CdpSessionId::from("P"),
+            local_root: parent.is_none(),
+            context: None,
+        };
+        let frames = [
+            info("M", None, Some("d1")),
+            // Moving between processes: no document, so neither it nor its
+            // committed child is read.
+            info("A", Some("M"), None),
+            info("B", Some("A"), Some("d2")),
+            info("C", Some("M"), Some("d3")),
+            info("D", Some("C"), Some("d4")),
+            // A frame whose parent is unknown is not read.
+            info("E", Some("Z"), Some("d5")),
+        ];
+        let read: Vec<&str> = observable_frames(&frames)
+            .iter()
+            .map(|info| info.frame.as_str())
+            .collect();
+        assert_eq!(read, ["M", "C", "D"]);
     }
 }

@@ -32,6 +32,7 @@ use std::time::{Duration, Instant};
 use aero_core::ids::{RuntimeEpoch, TargetId};
 
 use crate::evaluate::EvaluateError;
+use crate::frame_manager::FrameManager;
 use crate::launcher::{SandboxSpec, Viewport};
 use crate::page::Page;
 use crate::target_registry::{AttachError, TargetInfo, TargetRegistry};
@@ -135,6 +136,10 @@ pub enum RuntimeError {
     HttpStatus(u16),
     /// The new document did not reach DOMContentLoaded before the deadline.
     NavigationTimeout,
+    /// The frame is not (or no longer) in the page's frame graph.
+    FrameGone,
+    /// The frame graph is being rebuilt after missed events.
+    FramesUnknown,
 }
 
 impl std::fmt::Display for RuntimeError {
@@ -149,6 +154,8 @@ impl std::fmt::Display for RuntimeError {
             Self::Evaluate(error) => write!(f, "page evaluation failed: {error}"),
             Self::HttpStatus(status) => write!(f, "the document returned HTTP {status}"),
             Self::NavigationTimeout => f.write_str("the navigation did not finish in time"),
+            Self::FrameGone => f.write_str("the frame is gone"),
+            Self::FramesUnknown => f.write_str("the frame graph is being rebuilt"),
         }
     }
 }
@@ -252,11 +259,15 @@ impl BrowserRuntime {
             .attach(target)
             .await
             .map_err(RuntimeError::Attach)?;
+        let frames = FrameManager::start(Arc::clone(self.registry.connection()), session.clone())
+            .await
+            .map_err(RuntimeError::Cdp)?;
         let page = Page::new(
             Arc::clone(self.registry.connection()),
             self.registry.handle(),
             target.clone(),
             session,
+            frames,
         );
         // `--window-size` sizes the window, not the page: apply the root
         // viewport (implementation plan §4: CSS px at device scale factor 1).
