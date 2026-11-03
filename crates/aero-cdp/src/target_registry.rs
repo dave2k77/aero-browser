@@ -17,6 +17,7 @@ use std::time::Duration;
 
 use aero_core::ids::{CdpSessionId, TargetId};
 use serde_json::{Value, json};
+use tokio::sync::watch;
 use tokio::task::JoinHandle;
 
 use crate::{CdpConnection, CdpError, CdpEvent, EventStream};
@@ -63,6 +64,9 @@ pub(crate) struct RegistryState {
     /// Our attachments: `None` while an attach call is in flight.
     attached: HashMap<TargetId, Option<CdpSessionId>>,
     resyncs: u64,
+    /// Counts ended sessions of ours; published so in-flight page calls can
+    /// fail promptly instead of waiting for a reply that never comes.
+    detachments: u64,
     /// Why the listener stopped, once it has.
     closed: Option<String>,
 }
@@ -88,8 +92,10 @@ impl RegistryState {
             }
             "Target.detachedFromTarget" => {
                 if let Some(session) = params["sessionId"].as_str() {
+                    let before = self.attached.len();
                     self.attached
                         .retain(|_, ours| ours.as_ref().map(CdpSessionId::as_str) != Some(session));
+                    self.detachments += (before - self.attached.len()) as u64;
                 }
             }
             _ => {}
@@ -123,6 +129,7 @@ impl RegistryState {
                 && let Some(Some(_)) = self.attached.get(&info.target_id)
             {
                 self.attached.remove(&info.target_id);
+                self.detachments += 1;
             }
         }
         for info in parsed {
@@ -154,7 +161,9 @@ impl RegistryState {
 
     fn remove(&mut self, id: &TargetId) {
         self.targets.remove(id);
-        self.attached.remove(id);
+        if let Some(Some(_)) = self.attached.remove(id) {
+            self.detachments += 1;
+        }
         self.destroyed.insert(id.clone());
     }
 
@@ -165,17 +174,36 @@ impl RegistryState {
 
 /// Shared read access to the registry, for pages checking session ownership.
 #[derive(Clone)]
-pub(crate) struct TargetRegistryHandle(Arc<Mutex<RegistryState>>);
+pub(crate) struct TargetRegistryHandle {
+    state: Arc<Mutex<RegistryState>>,
+    detachments: watch::Receiver<u64>,
+}
 
 impl TargetRegistryHandle {
     pub(crate) fn owns(&self, target: &TargetId, session: &CdpSessionId) -> bool {
-        lock(&self.0).session_of(target) == Some(session)
+        lock(&self.state).session_of(target) == Some(session)
+    }
+
+    /// Resolves once the registry no longer owns `session` for `target`, or
+    /// once the registry has stopped (ownership can then no longer be known).
+    pub(crate) async fn until_detached(&self, target: &TargetId, session: &CdpSessionId) {
+        let mut changes = self.detachments.clone();
+        loop {
+            changes.borrow_and_update();
+            if !self.owns(target, session) {
+                return;
+            }
+            if changes.changed().await.is_err() {
+                return;
+            }
+        }
     }
 }
 
 /// Live target registry for one browser connection.
 pub struct TargetRegistry {
     state: Arc<Mutex<RegistryState>>,
+    detachments: watch::Receiver<u64>,
     connection: Arc<CdpConnection>,
     listener: Option<JoinHandle<()>>,
 }
@@ -200,14 +228,17 @@ impl TargetRegistry {
         // Subscribe before enabling, so no discovery event can be missed.
         let events = connection.subscribe();
         let state = Arc::new(Mutex::new(RegistryState::default()));
+        let (publish, detachments) = watch::channel(0);
         let listener = tokio::spawn(listen(
             events,
             Arc::clone(&state),
             Arc::downgrade(&connection),
+            publish,
         ));
         // From here, dropping `registry` on an error aborts the listener.
         let registry = Self {
             state,
+            detachments,
             connection,
             listener: Some(listener),
         };
@@ -299,7 +330,10 @@ impl TargetRegistry {
     }
 
     pub(crate) fn handle(&self) -> TargetRegistryHandle {
-        TargetRegistryHandle(Arc::clone(&self.state))
+        TargetRegistryHandle {
+            state: Arc::clone(&self.state),
+            detachments: self.detachments.clone(),
+        }
     }
 
     pub(crate) fn connection(&self) -> &Arc<CdpConnection> {
@@ -349,10 +383,22 @@ async fn listen(
     mut events: EventStream,
     state: Arc<Mutex<RegistryState>>,
     connection: Weak<CdpConnection>,
+    publish: watch::Sender<u64>,
 ) {
+    let announce = |state: &Mutex<RegistryState>| {
+        let count = lock(state).detachments;
+        publish.send_if_modified(|seen| {
+            let changed = *seen != count;
+            *seen = count;
+            changed
+        });
+    };
     loop {
         match events.recv().await {
-            Ok(event) => lock(&state).apply(&event),
+            Ok(event) => {
+                lock(&state).apply(&event);
+                announce(&state);
+            }
             Err(CdpError::EventLag(_)) => {
                 let Some(connection) = connection.upgrade() else {
                     lock(&state).closed = Some("connection dropped".into());
@@ -363,6 +409,7 @@ async fn listen(
                     break;
                 }
                 lock(&state).resyncs += 1;
+                announce(&state);
             }
             Err(error) => {
                 lock(&state).closed = Some(error.to_string());
@@ -584,5 +631,6 @@ mod tests {
         let mark = state.snapshot_mark();
         state.apply_snapshot(&[], mark);
         assert_eq!(state.session_of(&a), None);
+        assert_eq!(state.detachments, 3, "every ended session is announced");
     }
 }

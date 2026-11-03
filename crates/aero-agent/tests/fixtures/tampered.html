@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>AeroBrowser tampered fixture</title>
+<script>
+// A hostile page disables the primitives a stability check would use.
+window.setTimeout = () => 0;
+window.clearTimeout = () => {};
+window.requestAnimationFrame = () => 0;
+window.MutationObserver = function () { return { observe() {}, disconnect() {} }; };
+</script>
+</head>
+<body>
+<h1>Tampered fixture</h1>
+</body>
+</html>

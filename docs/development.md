@@ -52,7 +52,7 @@ No provider, external database server, keyring, desktop GUI, model download, rea
 
 `cargo test -p aero-cdp --test sandbox --locked` runs five pure tests of `SandboxSpec::build`; nothing is spawned and no real host path is read. They prove the constructed Bubblewrap argument vector (namespaces, cleared environment, private roots and mount order, merged-/usr handling, display sockets, refused inputs), not that the sandbox works: C04's browser tests own that.
 
-### Browser tests (C04, C07)
+### Browser tests (C04–C07)
 
 Real-browser tests are behind `browser-tests` features and need the pinned browser plus Bubblewrap. With the feature enabled, a missing `AERO_CHROMIUM` (or Bubblewrap) is a test failure, never a skip (§6, SPEC-30):
 
@@ -64,7 +64,7 @@ cargo test -p aero-agent --locked --features browser-tests --test scenarios -- -
 
 `AERO_BWRAP` selects Bubblewrap (default `/usr/bin/bwrap`). `AERO_REQUIRE_BROWSER=1` is still accepted in documented commands but no longer changes behaviour. Without the feature, `tests/scenarios.rs` compiles to no tests, so the default workspace suite needs no browser.
 
-The scenario harness (`crates/aero-agent/tests/support/`) starts a test-only static server for `crates/aero-agent/tests/fixtures/*.html` on `127.0.0.1:0` (GET/HEAD, names `[a-z0-9-]+.html` only) and a browser in B06 private task/run/runtime directories via the C03/C04 launcher. Tests open only local fixture, `about:blank`, `file:` and `chrome://sandbox` pages and assert that no `/opt/aero/browser/` process remains. If an interrupted run leaves a sandbox behind, kill its namespace init (the `bwrap` whose `NSpid` ends in 1); the kernel then kills the whole sandbox.
+The scenario harness (`crates/aero-agent/tests/support/`) starts a test-only static server for `crates/aero-agent/tests/fixtures/*.html` on `127.0.0.1:0` (GET/HEAD, names `[a-z0-9-]+.html` only; `/hold` is accepted and never answered, for deadline tests) and a browser in B06 private task/run/runtime directories via the C03/C04 launcher. Tests open only local fixture, `about:blank`, `file:` and `chrome://sandbox` pages and assert that no `/opt/aero/browser/` process remains. If an interrupted run leaves a sandbox behind, kill its namespace init (the `bwrap` whose `NSpid` ends in 1); the kernel then kills the whole sandbox.
 
 ### B04 storage prerequisites
 

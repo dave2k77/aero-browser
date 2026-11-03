@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>AeroBrowser dynamic fixture</title>
+</head>
+<body>
+<h1>Dynamic fixture</h1>
+<p id="ticker">0</p>
+<script>
+// Never quiet: the DOM changes every 50 ms, and a request never completes.
+let ticks = 0;
+setInterval(() => {
+  document.getElementById("ticker").textContent = String(++ticks);
+}, 50);
+fetch("/hold").catch(() => {});
+</script>
+</body>
+</html>

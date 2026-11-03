@@ -31,6 +31,7 @@ use std::time::{Duration, Instant};
 
 use aero_core::ids::TargetId;
 
+use crate::evaluate::EvaluateError;
 use crate::launcher::SandboxSpec;
 use crate::page::Page;
 use crate::target_registry::{AttachError, TargetInfo, TargetRegistry};
@@ -128,6 +129,12 @@ pub enum RuntimeError {
     NavigationFailed(String),
     /// No tab appeared before the deadline.
     NoTab,
+    /// A page evaluation needed by the operation failed.
+    Evaluate(EvaluateError),
+    /// The new document's HTTP status was 4xx or 5xx.
+    HttpStatus(u16),
+    /// The new document did not reach DOMContentLoaded before the deadline.
+    NavigationTimeout,
 }
 
 impl std::fmt::Display for RuntimeError {
@@ -139,6 +146,9 @@ impl std::fmt::Display for RuntimeError {
             Self::Detached => f.write_str("the page session is detached"),
             Self::NavigationFailed(_) => f.write_str("the browser rejected the navigation"),
             Self::NoTab => f.write_str("no tab appeared in time"),
+            Self::Evaluate(error) => write!(f, "page evaluation failed: {error}"),
+            Self::HttpStatus(status) => write!(f, "the document returned HTTP {status}"),
+            Self::NavigationTimeout => f.write_str("the navigation did not finish in time"),
         }
     }
 }
@@ -194,6 +204,11 @@ impl BrowserRuntime {
 
     pub fn target(&self, id: &TargetId) -> Option<TargetInfo> {
         self.registry.target(id)
+    }
+
+    /// Why the target registry stopped following events, if it has.
+    pub fn registry_failure(&self) -> Option<String> {
+        self.registry.failure()
     }
 
     /// Times the target registry rebuilt itself after missing events.

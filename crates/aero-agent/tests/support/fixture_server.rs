@@ -1,7 +1,8 @@
 //! Local static fixture server for browser scenarios (test-only).
 //!
 //! Serves `tests/fixtures/<name>.html` on `127.0.0.1:0`, GET/HEAD only, one
-//! request per connection. Names are restricted to `[a-z0-9-]+.html`, so no
+//! request per connection. `/hold` is accepted but never answered (a
+//! long-lived request for deadline tests). Names are restricted to `[a-z0-9-]+.html`, so no
 //! path can leave the fixtures directory. Every request line is recorded so
 //! scenarios can assert what the browser actually fetched. The accept loop and
 //! every connection task are owned: `shutdown` stops and joins them, and
@@ -120,6 +121,11 @@ async fn answer(mut stream: TcpStream, requests: Arc<Mutex<Vec<String>>>) {
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
         .push(format!("{method} {target}"));
+    // `/hold` never answers: a long-lived request that only the server's
+    // shutdown (which aborts this task) ends.
+    if target == "/hold" {
+        std::future::pending::<()>().await;
+    }
     let (status, body) = match method {
         "GET" | "HEAD" => match fixture(target) {
             Some(body) => ("200 OK", body),

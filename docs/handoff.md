@@ -1,8 +1,26 @@
 # AeroBrowser — implementation handoff
 
-Document-set revision: 2.27. Current checkpoint: chain batch CH-12 (C05) below, uncommitted and ready for review. Everything through e538e20 (CH-11, C07) is committed and pushed. Prior checkpoints below are historical where their next actions or test counts differ.
+Document-set revision: 2.28. Current checkpoint: chain batch CH-13 (C06) below, uncommitted and ready for review. Everything through bcc9961 (CH-12, C05) is committed and pushed. Prior checkpoints below are historical where their next actions or test counts differ.
 
-## Current chain batch CH-12 checkpoint
+## Current chain batch CH-13 checkpoint
+
+The owner said “yes, go ahead” to committing C05 and starting C06. C05 was committed as bcc9961 and pushed (remote main read back at the same SHA).
+
+CH-13 — C06 bounded page evaluation and lifecycle waits, uncommitted, WSL2 evidence:
+
+- `crates/aero-cdp/src/evaluate.rs`: `Runtime.evaluate` with `returnByValue` and `awaitPromise`. `interpret` turns `exceptionDetails` (thrown value or rejected promise) into `EvaluateError::Exception` (the exception description, else the text; truncated to `MAX_EXCEPTION_CHARS` = 1024, untrusted), `unserializableValue` into `Unserializable`, a missing result/value into `Cdp(InvalidMessage)`, `undefined` into `null`, and a JSON result above `max_result_bytes` (default 1 MiB) into `ResultTooLarge`. `EvaluateOptions.deadline` (default 10 s) bounds the whole operation including retries. A destroyed context is `ContextDestroyed` unless the caller sets `context_destroyed_retries` (for idempotent expressions only), and only four exact protocol messages count as context loss; every other error propagates.
+- `Page::evaluate`/`evaluate_with`, and `Page::navigate_and_wait(url, &NavigationLimits)` → `NavigationOutcome { same_document, url, status, stable }`. It subscribes before enabling Page, lifecycle events and Network and before navigating; `Page.navigate` without `loaderId` is a same-document change; otherwise it waits for this loader and frame's `DOMContentLoaded` and records this loader's `Document` response status. Failures are errors, not success: `errorText` → `NavigationFailed`, 4xx/5xx → `HttpStatus`, missed navigation deadline (default 30 s) → `NavigationTimeout` after a best-effort `Page.stopLoading`. Missed events during the wait are an error (no silent continuation). The reported URL is the current navigation-history entry.
+- Stability runs in an isolated world (`Page.createIsolatedWorld`), so page scripts cannot replace its timers, animation frames or observer: after DOMContentLoaded, 200 ms with no DOM mutation, then two animation frames; the cap (default 5 s) yields `stable: false`, never an indefinite wait. Network idle is deliberately not a condition, so long-lived requests and sockets cannot hold it open. A context destroyed during the stability wait gets one fresh attempt, then `stable: false`.
+- C05 defect found and fixed here: under repetition `page_target_navigation` failed 2 of 15 runs because a call sent just before the tab closed was never answered and waited the full 10 s. `RegistryState` now counts ended sessions (`detachments`), the listener publishes them on a `watch` channel, and every `Page` call races its request against `until_detached`, returning `Detached` promptly. The scenario now closes the tab while a never-settling call is in flight and requires `Detached` within 3 s. After the fix: 0 of 20 and 0 of 15 targeted repetitions failed. `BrowserRuntime::registry_failure()` exposes why the registry stopped, if it has.
+- Harness: the fixture server accepts `/hold` and never answers it; new fixtures `dynamic.html` (mutates every 50 ms and fetches `/hold`) and `tampered.html` (replaces `setTimeout`, `clearTimeout`, `requestAnimationFrame` and `MutationObserver`).
+- Tests: unit tests `values_and_undefined_are_returned`, `exceptions_are_errors_not_null`, `non_json_large_and_malformed_results_are_errors`, `only_context_loss_is_retryable` (observed red against stubs, then green); scenarios `evaluate_exception_is_error` and `navigation_and_stability_deadlines` (observed red against stub `navigate_and_wait`, then green) as listed in the plan ledger; five full scenario runs passed after the race fix was applied in the test. Mutation pass: 18 defects, 17 caught; the survivor (skipping `evaluate`'s up-front ownership check) is equivalent at the API level because the detach race resolves immediately for an unowned session.
+- Gates: workspace 293 passed (289 + 4), 0 failed/ignored; aero-cdp + aero-agent with browser features and the browser: 205 passed; warning-denied Clippy (workspace, and both crates with browser features), fmt, warning-denied rustdoc, the documentation checker and `git diff --check` pass; Cargo.lock unchanged. Not independently reviewed.
+
+Limits: WSL2 only (ENV-004). Blocked pages (DNS/policy blocks) beyond a refused connection are not exercised separately; history (`pushState`) SPA changes are not driven by `navigate_and_wait` (it reports fragment navigations it initiates); cross-document navigations started by the page itself are not awaited; no frames/OOPIF (D04). Downloads and dialogs during navigation are out of scope here.
+
+Next by plan order: D01 observation capture.
+
+## Previous chain batch CH-12 checkpoint (committed bcc9961)
 
 The owner said “yes, go ahead” to committing C07 and starting C05. C07 was committed as e538e20 and pushed (remote main read back at the same SHA).
 
@@ -19,9 +37,9 @@ CH-12 — C05 page target attachment and navigation, uncommitted, WSL2 evidence:
 
 Limits: WSL2 only (ENV-004). Lag resync is unit-reasoned but not exercised against a real browser. No same-document/SPA navigation, load waiting or stability (C06); no frames/OOPIF sessions (D04); no detach, tab creation/close or popup ownership API (G05).
 
-Next: C06 bounded page evaluation and lifecycle waits (`evaluate_exception_is_error`, `navigation_and_stability_deadlines`).
+Next was C06 (CH-13 above).
 
-## Previous chain batch CH-11 checkpoint (committed e538e20)
+### Earlier: chain batch CH-11 checkpoint (committed e538e20)
 
 The owner said “yes, go ahead” to committing C04 and starting the next package. C04 was committed as 93c975d and pushed (remote main read back at the same SHA). The plan's Batch C order is C01–C04, then C07, then C05–C06, so the next package was C07 (fixture harness), not C05 as the previous report proposed.
 

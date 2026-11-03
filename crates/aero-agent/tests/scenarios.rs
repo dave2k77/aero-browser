@@ -271,32 +271,253 @@ async fn page_target_navigation() {
             .any(|r| r == "GET /second.html")
     );
 
-    // Closing the tab ends the registry's session; the page then refuses calls
-    // instead of sending them to a dead or reused session.
-    fixture
-        .cdp()
-        .call(
-            "Target.closeTarget",
-            json!({ "targetId": tab.target_id.as_str() }),
-            None,
-            support::CALL,
-        )
-        .await
-        .expect("close the tab");
-    let detached = support::eventually(Duration::from_secs(10), || async {
-        match page
-            .call("Runtime.evaluate", json!({ "expression": "1" }))
+    // Closing the tab while a call is in flight ends that call promptly (the
+    // browser never answers it) and later calls are refused outright.
+    let in_flight = page.call(
+        "Runtime.evaluate",
+        json!({ "expression": "new Promise(() => {})", "awaitPromise": true }),
+    );
+    let close = async {
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        fixture
+            .cdp()
+            .call(
+                "Target.closeTarget",
+                json!({ "targetId": tab.target_id.as_str() }),
+                None,
+                support::CALL,
+            )
             .await
-        {
-            Err(RuntimeError::Detached) => Some(()),
-            _ => None,
-        }
+    };
+    let started = std::time::Instant::now();
+    let (pending, closed) = tokio::join!(in_flight, close);
+    closed.expect("close the tab");
+    assert_eq!(pending.err(), Some(RuntimeError::Detached));
+    assert!(
+        started.elapsed() < Duration::from_secs(3),
+        "the in-flight call waited {:?}",
+        started.elapsed()
+    );
+    assert_eq!(
+        page.call("Runtime.evaluate", json!({ "expression": "1" }))
+            .await
+            .err(),
+        Some(RuntimeError::Detached)
+    );
+    assert_eq!(
+        page.evaluate("1").await,
+        Err(aero_cdp::evaluate::EvaluateError::Detached)
+    );
+    // The session ends before the target is destroyed; removal follows.
+    let removed = support::eventually(Duration::from_secs(5), || async {
+        runtime.target(&tab.target_id).is_none().then_some(())
     })
     .await;
-    assert!(detached.is_some(), "a closed tab's page refuses calls");
-    assert!(runtime.target(&tab.target_id).is_none());
+    assert!(removed.is_some(), "the closed tab leaves the registry");
 
     drop(page);
+    fixture.shutdown().await.expect("teardown");
+    assert_eq!(support::sandbox_processes(), Vec::<u32>::new());
+}
+
+/// C06: evaluation results are values or explicit errors, bounded in size and
+/// time; a destroyed context is retried only when the caller opts in.
+#[cfg(feature = "browser-tests")]
+#[tokio::test]
+async fn evaluate_exception_is_error() {
+    use aero_cdp::CdpError;
+    use aero_cdp::evaluate::{EvaluateError, EvaluateOptions};
+    use aero_cdp::page::NavigationLimits;
+    use serde_json::{Value, json};
+    use std::time::{Duration, Instant};
+
+    let _serial = support::serial().await;
+    let fixture = support::Fixture::start()
+        .await
+        .expect("required native browser fixture failed to start");
+    let runtime = fixture.runtime();
+    let tab = runtime.wait_for_tab(Duration::from_secs(10)).await.unwrap();
+    let page = runtime.attach(&tab.target_id).await.unwrap();
+    let basic = fixture.server.url("basic.html");
+    let second = fixture.server.url("second.html");
+    page.navigate_and_wait(&basic, &NavigationLimits::default())
+        .await
+        .expect("fixture loads");
+
+    assert_eq!(page.evaluate("1 + 1").await, Ok(json!(2)));
+    assert_eq!(
+        page.evaluate("document.title").await,
+        Ok(json!("AeroBrowser basic fixture"))
+    );
+    assert_eq!(page.evaluate("undefined").await, Ok(Value::Null));
+    for (expression, message) in [
+        ("throw new Error('fixture boom')", "fixture boom"),
+        ("Promise.reject(new Error('async boom'))", "async boom"),
+    ] {
+        match page.evaluate(expression).await {
+            Err(EvaluateError::Exception(text)) => assert!(text.contains(message), "{text}"),
+            other => panic!("{expression}: {other:?}"),
+        }
+    }
+    assert_eq!(
+        page.evaluate("NaN").await,
+        Err(EvaluateError::Unserializable("NaN".into()))
+    );
+    assert!(matches!(
+        page.evaluate("'x'.repeat(2 * 1024 * 1024)").await,
+        Err(EvaluateError::ResultTooLarge { .. })
+    ));
+
+    // A promise that never settles is bounded by the deadline.
+    let short = EvaluateOptions {
+        deadline: Duration::from_millis(500),
+        ..EvaluateOptions::default()
+    };
+    let started = Instant::now();
+    assert_eq!(
+        page.evaluate_with("new Promise(() => {})", &short).await,
+        Err(EvaluateError::Cdp(CdpError::Timeout))
+    );
+    assert!(started.elapsed() < Duration::from_secs(3));
+
+    // Hangs on the basic fixture, answers on the next document.
+    let hang = "location.pathname === '/basic.html' \
+        ? new Promise(() => {}) \
+        : new Promise(resolve => document.readyState === 'loading' \
+            ? addEventListener('DOMContentLoaded', () => resolve(document.title)) \
+            : resolve(document.title))";
+    let navigate_soon = |target: String| {
+        let page = &page;
+        async move {
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            page.navigate(&target).await
+        }
+    };
+    // Without opt-in, a destroyed context is reported, not retried or swallowed.
+    let (result, navigated) = tokio::join!(page.evaluate(hang), navigate_soon(second.clone()));
+    navigated.unwrap();
+    assert_eq!(result, Err(EvaluateError::ContextDestroyed));
+    // With opt-in, the idempotent expression runs again in the new document.
+    page.navigate_and_wait(&basic, &NavigationLimits::default())
+        .await
+        .unwrap();
+    let retry = EvaluateOptions {
+        context_destroyed_retries: 3,
+        ..EvaluateOptions::default()
+    };
+    let (result, navigated) = tokio::join!(
+        page.evaluate_with(hang, &retry),
+        navigate_soon(second.clone())
+    );
+    navigated.unwrap();
+    assert_eq!(result, Ok(json!("AeroBrowser second fixture")));
+
+    fixture.shutdown().await.expect("teardown");
+    assert_eq!(support::sandbox_processes(), Vec::<u32>::new());
+}
+
+/// C06: navigation waits for the new document and bounded stability; HTTP and
+/// network failures and missed deadlines are errors; endless mutations and
+/// long-lived requests cannot hang the wait.
+#[cfg(feature = "browser-tests")]
+#[tokio::test]
+async fn navigation_and_stability_deadlines() {
+    use aero_cdp::page::NavigationLimits;
+    use aero_cdp::runtime::RuntimeError;
+    use std::time::{Duration, Instant};
+
+    let _serial = support::serial().await;
+    let fixture = support::Fixture::start()
+        .await
+        .expect("required native browser fixture failed to start");
+    let runtime = fixture.runtime();
+    let tab = runtime.wait_for_tab(Duration::from_secs(10)).await.unwrap();
+    let page = runtime.attach(&tab.target_id).await.unwrap();
+    let limits = NavigationLimits {
+        stability_cap: Duration::from_secs(2),
+        ..NavigationLimits::default()
+    };
+
+    let basic = fixture.server.url("basic.html");
+    let loaded = page
+        .navigate_and_wait(&basic, &limits)
+        .await
+        .expect("loads");
+    assert!(!loaded.same_document);
+    assert_eq!(loaded.status, Some(200));
+    assert_eq!(loaded.url, basic);
+    assert!(loaded.stable, "a static page becomes stable");
+
+    // Same-document (fragment) navigation has no new loader.
+    let fragment = format!("{basic}#section");
+    let moved = page
+        .navigate_and_wait(&fragment, &limits)
+        .await
+        .expect("fragment");
+    assert!(moved.same_document);
+    assert_eq!(moved.url, fragment);
+    assert_eq!(moved.status, None);
+
+    // A page that replaces timers, animation frames and MutationObserver
+    // cannot break or fake the check: it runs in an isolated world.
+    let tampered = page
+        .navigate_and_wait(&fixture.server.url("tampered.html"), &limits)
+        .await
+        .expect("loads");
+    assert!(
+        tampered.stable,
+        "stability is measured outside the page's world"
+    );
+
+    // Endless mutations and a request that never completes: the document
+    // loads, stability gives up at its cap, nothing hangs.
+    let started = Instant::now();
+    let dynamic = page
+        .navigate_and_wait(&fixture.server.url("dynamic.html"), &limits)
+        .await
+        .expect("loads despite the pending request");
+    let waited = started.elapsed();
+    assert!(!dynamic.stable);
+    assert!(waited >= Duration::from_millis(1900), "{waited:?}");
+    assert!(waited < Duration::from_secs(6), "{waited:?}");
+    assert!(fixture.server.requests().iter().any(|r| r == "GET /hold"));
+
+    // HTTP and network failures are errors, not successes.
+    assert_eq!(
+        page.navigate_and_wait(&fixture.server.url("missing.html"), &limits)
+            .await
+            .err(),
+        Some(RuntimeError::HttpStatus(404))
+    );
+    let refused = page
+        .navigate_and_wait("http://127.0.0.1:1/unreachable.html", &limits)
+        .await;
+    assert!(
+        matches!(refused, Err(RuntimeError::NavigationFailed(ref text)) if text.contains("ERR_")),
+        "{refused:?}"
+    );
+
+    // A document that never arrives is bounded by the navigation deadline.
+    let short = NavigationLimits {
+        navigation: Duration::from_secs(1),
+        ..limits.clone()
+    };
+    let started = Instant::now();
+    assert_eq!(
+        page.navigate_and_wait(&fixture.server.url("hold"), &short)
+            .await
+            .err(),
+        Some(RuntimeError::NavigationTimeout)
+    );
+    assert!(started.elapsed() < Duration::from_secs(4));
+
+    // The page is still usable afterwards.
+    let again = page
+        .navigate_and_wait(&basic, &limits)
+        .await
+        .expect("recovers");
+    assert_eq!(again.status, Some(200));
+
     fixture.shutdown().await.expect("teardown");
     assert_eq!(support::sandbox_processes(), Vec::<u32>::new());
 }

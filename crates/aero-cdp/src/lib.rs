@@ -9,6 +9,7 @@
 
 mod connection;
 mod error;
+pub mod evaluate;
 pub mod launcher;
 pub mod page;
 pub mod runtime;
