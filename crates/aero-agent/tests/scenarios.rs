@@ -865,3 +865,398 @@ async fn occluded_target_is_rejected() {
     fixture.shutdown().await.expect("teardown");
     assert_eq!(support::sandbox_processes(), Vec::<u32>::new());
 }
+
+/// D03 helpers: the forms fixture and its event log.
+#[cfg(feature = "browser-tests")]
+mod forms {
+    use std::time::Duration;
+
+    use aero_cdp::page::{NavigationLimits, Page};
+    use aero_core::ids::ObservationId;
+    use aero_perception::observation::{Observation, observe_page};
+    use serde_json::{Map, Value};
+
+    use crate::support::Fixture;
+
+    pub async fn open(fixture: &Fixture) -> (Page, Observation) {
+        let runtime = fixture.runtime();
+        let tab = runtime.wait_for_tab(Duration::from_secs(10)).await.unwrap();
+        let page = runtime.attach(&tab.target_id).await.unwrap();
+        page.navigate_and_wait(
+            &fixture.server.url("forms.html"),
+            &NavigationLimits::default(),
+        )
+        .await
+        .expect("forms fixture loads");
+        let observation = observe_page(
+            &page,
+            ObservationId::from("forms-1"),
+            runtime.epoch().clone(),
+        )
+        .await
+        .expect("observation");
+        (page, observation)
+    }
+
+    /// The handle of the one element with this role and name.
+    pub fn handle(observation: &Observation, role: &str, name: &str) -> String {
+        let mut found: Vec<String> = observation
+            .handles()
+            .iter()
+            .filter(|(_, target)| target.role == role && target.name == name)
+            .map(|(handle, _)| handle.to_string())
+            .collect();
+        assert_eq!(
+            found.len(),
+            1,
+            "one {role} {name:?} in:\n{}",
+            observation.text()
+        );
+        found.remove(0)
+    }
+
+    pub async fn log(page: &Page) -> Map<String, Value> {
+        let text = page.evaluate("JSON.stringify(window.log)").await.unwrap();
+        serde_json::from_str(text.as_str().unwrap()).unwrap()
+    }
+
+    pub fn count(log: &Map<String, Value>, key: &str) -> u64 {
+        log.get(key).and_then(Value::as_u64).unwrap_or(0)
+    }
+
+    /// No pointer input of any kind reached the page.
+    pub fn no_pointer_input(log: &Map<String, Value>) -> bool {
+        !log.keys().any(|key| {
+            key.starts_with("pointerdown:")
+                || key.starts_with("mousedown:")
+                || key.starts_with("click:")
+        })
+    }
+
+    pub async fn value(page: &Page, id: &str) -> Value {
+        page.evaluate(&format!("document.getElementById('{id}').value"))
+            .await
+            .unwrap()
+    }
+}
+
+/// D03: Unicode is inserted exactly (input, textarea, a controlled input),
+/// clearing works, newline text cannot reach a single-line input, and Enter is
+/// one dedicated key event that submits exactly once, only when requested.
+#[cfg(feature = "browser-tests")]
+#[tokio::test]
+async fn unicode_type_clear_and_enter() {
+    use aero_executor::TargetRef;
+    use aero_executor::dispatcher::{InputError, type_text};
+
+    let _serial = support::serial().await;
+    let fixture = support::Fixture::start()
+        .await
+        .expect("required native browser fixture failed to start");
+    let runtime = fixture.runtime();
+    let (page, observation) = forms::open(&fixture).await;
+    let handles: Vec<String> = [
+        "Name",
+        "Notes",
+        "Controlled",
+        "Read only",
+        "Slippery",
+        "Sticky",
+        "Short",
+        "Prefilled",
+    ]
+    .iter()
+    .map(|name| forms::handle(&observation, "textbox", name))
+    .collect();
+    let target = |index: usize| TargetRef {
+        handles: observation.handles(),
+        observation: observation.id(),
+        runtime: runtime.epoch(),
+        handle: &handles[index],
+    };
+
+    let unicode = "Grüße, 世界 🙂 مرحبا";
+    type_text(&page, target(0), unicode, true, false)
+        .await
+        .expect("type into Name");
+    assert_eq!(forms::value(&page, "name").await, unicode);
+
+    // Appending keeps the existing text; a textarea keeps its newlines.
+    type_text(&page, target(1), "line one\nline two ✓", false, false)
+        .await
+        .expect("type into Notes");
+    type_text(&page, target(1), " — end", false, false)
+        .await
+        .expect("append to Notes");
+    assert_eq!(
+        forms::value(&page, "notes").await,
+        "line one\nline two ✓ — end"
+    );
+
+    // A controlled input keeps the text because real input events updated its state.
+    type_text(&page, target(2), "Ünïcode ✓", true, false)
+        .await
+        .expect("type into Controlled");
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    assert_eq!(forms::value(&page, "controlled").await, "Ünïcode ✓");
+
+    // Newline text never reaches a single-line input, and nothing submits.
+    assert_eq!(
+        type_text(&page, target(0), "x\ny", true, false).await,
+        Err(InputError::NewlineInSingleLine)
+    );
+    assert_eq!(forms::value(&page, "name").await, unicode);
+    assert_eq!(
+        type_text(&page, target(3), "nope", true, false).await,
+        Err(InputError::Readonly)
+    );
+    assert_eq!(forms::value(&page, "ro").await, "fixed");
+    let log = forms::log(&page).await;
+    assert_eq!(forms::count(&log, "submit"), 0);
+    assert_eq!(forms::count(&log, "keydown:Enter:name"), 0);
+
+    // Results are verified, not assumed: a field that will not take focus,
+    // one that refuses to be emptied, and one that cuts the text.
+    assert_eq!(
+        type_text(&page, target(4), "x", true, false).await,
+        Err(InputError::FocusFailed)
+    );
+    assert_eq!(
+        type_text(&page, target(5), "new", true, false).await,
+        Err(InputError::ClearFailed)
+    );
+    assert_eq!(
+        type_text(&page, target(6), "abcdef", true, false).await,
+        Err(InputError::ValueMismatch)
+    );
+    // Without clearing, text goes after the existing value.
+    type_text(&page, target(7), " end", false, false)
+        .await
+        .expect("append");
+    assert_eq!(forms::value(&page, "prefilled").await, "start end");
+
+    // Enter only when requested: one key event, one submission.
+    type_text(&page, target(0), "go", true, true)
+        .await
+        .expect("type and submit");
+    let log = forms::log(&page).await;
+    assert_eq!(forms::value(&page, "name").await, "go");
+    assert_eq!(forms::count(&log, "keydown:Enter:name"), 1);
+    assert_eq!(forms::count(&log, "submit"), 1);
+
+    drop(page);
+    fixture.shutdown().await.expect("teardown");
+    assert_eq!(support::sandbox_processes(), Vec::<u32>::new());
+}
+
+/// D03: typing focuses the field once with no pointer input at all, uses only
+/// the clearing keys it needs, and allow-listed keys go to the focused element.
+#[cfg(feature = "browser-tests")]
+#[tokio::test]
+async fn typing_does_not_double_click() {
+    use aero_executor::TargetRef;
+    use aero_executor::dispatcher::{InputError, press_key, type_text};
+
+    let _serial = support::serial().await;
+    let fixture = support::Fixture::start()
+        .await
+        .expect("required native browser fixture failed to start");
+    let runtime = fixture.runtime();
+    let (page, observation) = forms::open(&fixture).await;
+    let name = forms::handle(&observation, "textbox", "Name");
+    let target = TargetRef {
+        handles: observation.handles(),
+        observation: observation.id(),
+        runtime: runtime.epoch(),
+        handle: &name,
+    };
+
+    type_text(&page, target, "first", true, false)
+        .await
+        .expect("type");
+    type_text(&page, target, " second", false, false)
+        .await
+        .expect("type again");
+    assert_eq!(forms::value(&page, "name").await, "first second");
+    let log = forms::log(&page).await;
+    assert!(forms::no_pointer_input(&log), "{log:?}");
+    assert_eq!(
+        forms::count(&log, "focusin:name"),
+        1,
+        "focused once: {log:?}"
+    );
+    assert_eq!(
+        forms::count(&log, "keydown:a:name"),
+        1,
+        "one select-all: {log:?}"
+    );
+    assert_eq!(
+        forms::count(&log, "keydown:Backspace:name"),
+        1,
+        "one backspace: {log:?}"
+    );
+    let keys: u64 = log
+        .iter()
+        .filter(|(key, _)| key.starts_with("keydown:"))
+        .map(|(_, n)| n.as_u64().unwrap())
+        .sum();
+    assert_eq!(keys, 2, "no other key events: {log:?}");
+
+    // Allow-listed keys act on the focused element; others are refused.
+    press_key(&page, "Tab").await.expect("Tab");
+    assert_eq!(
+        page.evaluate("document.activeElement.id").await,
+        Ok(serde_json::json!("notes"))
+    );
+    assert_eq!(
+        press_key(&page, "F5").await,
+        Err(InputError::UnsupportedKey)
+    );
+    assert_eq!(press_key(&page, "a").await, Err(InputError::UnsupportedKey));
+    let log = forms::log(&page).await;
+    assert_eq!(forms::count(&log, "keydown:Tab:name"), 1);
+    assert!(forms::no_pointer_input(&log), "{log:?}");
+
+    drop(page);
+    fixture.shutdown().await.expect("teardown");
+    assert_eq!(support::sandbox_processes(), Vec::<u32>::new());
+}
+
+/// D03: select and checkbox changes are typed operations whose results are
+/// read back; refusals leave the controls unchanged.
+#[cfg(feature = "browser-tests")]
+#[tokio::test]
+async fn select_and_checkbox_are_verified() {
+    use aero_executor::TargetRef;
+    use aero_executor::dispatcher::{InputError, select_values, set_checked};
+    use aero_executor::target::GroundingError;
+
+    let _serial = support::serial().await;
+    let fixture = support::Fixture::start()
+        .await
+        .expect("required native browser fixture failed to start");
+    let runtime = fixture.runtime();
+    let (page, observation) = forms::open(&fixture).await;
+    let size = forms::handle(&observation, "combobox", "Size");
+    let toppings = forms::handle(&observation, "listbox", "Toppings");
+    let pinned = forms::handle(&observation, "combobox", "Pinned");
+    let name = forms::handle(&observation, "textbox", "Name");
+    let checkbox = |label: &str| forms::handle(&observation, "checkbox", label);
+    let radio = |label: &str| forms::handle(&observation, "radio", label);
+    let target = |handle: &str| TargetRef {
+        handles: observation.handles(),
+        observation: observation.id(),
+        runtime: runtime.epoch(),
+        handle: handle.to_owned().leak(),
+    };
+    let values = |list: &[&str]| list.iter().map(|v| (*v).to_owned()).collect::<Vec<_>>();
+    let selected = |id: &'static str| {
+        let page = &page;
+        async move {
+            page.evaluate(&format!(
+                "Array.from(document.getElementById('{id}').selectedOptions, o => o.value)"
+            ))
+            .await
+            .unwrap()
+        }
+    };
+    let checked = |id: &'static str| {
+        let page = &page;
+        async move {
+            page.evaluate(&format!("document.getElementById('{id}').checked"))
+                .await
+                .unwrap()
+        }
+    };
+
+    // Single select: exactly one known, enabled value.
+    select_values(&page, target(&size), &values(&["l"]))
+        .await
+        .expect("select Large");
+    assert_eq!(selected("size").await, serde_json::json!(["l"]));
+    for (bad, refusal) in [
+        (values(&["xxl"]), InputError::UnknownOption),
+        (values(&["xl"]), InputError::UnknownOption),
+        (values(&["s", "m"]), InputError::WrongValueCount),
+        (values(&[]), InputError::WrongValueCount),
+    ] {
+        assert_eq!(
+            select_values(&page, target(&size), &bad).await,
+            Err(refusal),
+            "{bad:?}"
+        );
+    }
+    assert_eq!(
+        selected("size").await,
+        serde_json::json!(["l"]),
+        "refusals change nothing"
+    );
+    // Multiple select: exactly the requested set.
+    select_values(&page, target(&toppings), &values(&["basil", "cheese"]))
+        .await
+        .expect("select toppings");
+    assert_eq!(
+        selected("toppings").await,
+        serde_json::json!(["cheese", "basil"])
+    );
+    assert_eq!(
+        select_values(&page, target(&name), &values(&["x"])).await,
+        Err(InputError::NotASelect)
+    );
+    // The application put its own value back: reported, not assumed.
+    assert_eq!(
+        select_values(&page, target(&pinned), &values(&["b"])).await,
+        Err(InputError::NotApplied)
+    );
+    assert_eq!(selected("pinned").await, serde_json::json!(["a"]));
+    let log = forms::log(&page).await;
+    assert_eq!(forms::count(&log, "change:size"), 1);
+    assert_eq!(forms::count(&log, "change:toppings"), 1);
+
+    // Checkbox: one click per change, none when already in the requested state.
+    set_checked(&page, target(&checkbox("Agree")), true)
+        .await
+        .expect("check");
+    set_checked(&page, target(&checkbox("Agree")), true)
+        .await
+        .expect("already checked");
+    assert_eq!(checked("agree").await, true);
+    assert_eq!(forms::count(&forms::log(&page).await, "click:agree"), 1);
+    set_checked(&page, target(&checkbox("Agree")), false)
+        .await
+        .expect("uncheck");
+    assert_eq!(checked("agree").await, false);
+    assert_eq!(forms::count(&forms::log(&page).await, "click:agree"), 2);
+    // The application refused the change: reported, not assumed.
+    assert_eq!(
+        set_checked(&page, target(&checkbox("Stuck")), true).await,
+        Err(InputError::NotApplied)
+    );
+    assert_eq!(checked("stuck").await, false);
+    assert_eq!(
+        set_checked(&page, target(&checkbox("Locked")), true).await,
+        Err(InputError::Grounding(GroundingError::Disabled))
+    );
+    assert_eq!(
+        set_checked(&page, target(&name), true).await,
+        Err(InputError::NotACheckbox)
+    );
+    // Radio buttons can be chosen but not unchosen.
+    set_checked(&page, target(&radio("Fast")), true)
+        .await
+        .expect("choose Fast");
+    assert_eq!(
+        (checked("fast").await, checked("slow").await),
+        (true.into(), false.into())
+    );
+    assert_eq!(
+        set_checked(&page, target(&radio("Fast")), false).await,
+        Err(InputError::CannotUncheckRadio)
+    );
+    assert_eq!(checked("fast").await, true);
+    assert_eq!(forms::count(&forms::log(&page).await, "submit"), 0);
+
+    drop(page);
+    fixture.shutdown().await.expect("teardown");
+    assert_eq!(support::sandbox_processes(), Vec::<u32>::new());
+}

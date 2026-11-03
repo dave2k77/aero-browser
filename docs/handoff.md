@@ -1,8 +1,23 @@
 # AeroBrowser — implementation handoff
 
-Document-set revision: 2.32. Current checkpoint: chain batch CH-15 (D02) below, uncommitted and ready for review. Everything through a465acc (CH-14, D01) is committed and pushed. Prior checkpoints below are historical where their next actions or test counts differ.
+Document-set revision: 2.33. Current checkpoint: chain batch CH-16 (D03) below, uncommitted and ready for review. Everything through 5c272d5 (CH-15, D02) is committed and pushed. Prior checkpoints below are historical where their next actions or test counts differ.
 
-## Current chain batch CH-15 checkpoint
+## Current chain batch CH-16 checkpoint
+
+The owner said “yes, go ahead” to committing D02 and starting D03. D02 was committed as 5c272d5 and pushed (remote main read back at the same SHA). D03 followed the plan row directly (no spike: it reuses D02 grounding).
+
+CH-16 — D03 Unicode text and control actions, uncommitted, WSL2 evidence:
+
+- `crates/aero-executor/src/target.rs`: `ground_node` = `ground` plus the node's object in the isolated world; `call_on` awaits promises.
+- `crates/aero-executor/src/dispatcher.rs`: `type_text`, `press_key`, `select_values`, `set_checked` and `InputError` (see the D03 ledger row for the ordered checks). Typing never sends pointer input; it focuses once, verifies the active element, clears with one Ctrl+A and one Backspace, inserts with `Input.insertText` and verifies the value after two animation frames. Enter is a dedicated key event sent only on request. `press_key` takes exactly the B02 named keys.
+- Fixture `crates/aero-agent/tests/fixtures/forms.html` with a controlled input, refusing fields, a self-reverting select, a click-cancelling checkbox and a per-element event log.
+- Tests: `named_keys_have_definitions_and_nothing_else_does`; scenarios `unicode_type_clear_and_enter`, `typing_does_not_double_click`, `select_and_checkbox_are_verified` (red against stubs first). 15 consecutive full scenario runs passed. Mutation pass (`/home/davia/.hermes/cache/scratch/aero-d03-mutants.py`): 22/22 caught after adding the self-reverting select.
+
+Limits: main frame only; contenteditable, number/date inputs and IME composition unsupported; selects are changed in the isolated world with synthetic `input`/`change` events, not through the native popup; whether Enter may submit is the caller's authorization decision; WSL2 only.
+
+Next by plan order: D04 iframe observation.
+
+## Previous chain batch CH-15 checkpoint (committed 5c272d5)
 
 The owner said “yes, go ahead” to committing D01 and starting D02, then approved the D02 plan (including the viewport fix and reading the plan's "geometry only for retained action candidates" as "measure only the target being acted on"). D01 was committed as a465acc and pushed (remote main read back at the same SHA).
 

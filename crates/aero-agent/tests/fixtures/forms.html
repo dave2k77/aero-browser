@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>AeroBrowser forms fixture</title>
+</head>
+<body>
+<form id="form">
+  <input id="name" aria-label="Name" value="old value">
+  <textarea id="notes" aria-label="Notes"></textarea>
+  <input id="controlled" aria-label="Controlled">
+  <input id="ro" aria-label="Read only" readonly value="fixed">
+  <input id="slippery" aria-label="Slippery">
+  <input id="sticky" aria-label="Sticky" value="keep">
+  <input id="short" aria-label="Short" maxlength="3">
+  <input id="prefilled" aria-label="Prefilled" value="start">
+  <select id="size" aria-label="Size">
+    <option value="s">Small</option>
+    <option value="m" selected>Medium</option>
+    <option value="l">Large</option>
+    <option value="xl" disabled>Extra large</option>
+  </select>
+  <select id="toppings" aria-label="Toppings" multiple>
+    <option value="cheese">Cheese</option>
+    <option value="olives" selected>Olives</option>
+    <option value="basil">Basil</option>
+  </select>
+  <select id="pinned" aria-label="Pinned">
+    <option value="a" selected>Pinned A</option>
+    <option value="b">Pinned B</option>
+  </select>
+  <input type="checkbox" id="agree" aria-label="Agree">
+  <input type="checkbox" id="stuck" aria-label="Stuck">
+  <input type="checkbox" id="locked" aria-label="Locked" disabled>
+  <input type="radio" name="speed" id="slow" aria-label="Slow" checked>
+  <input type="radio" name="speed" id="fast" aria-label="Fast">
+  <button type="submit">Send</button>
+</form>
+<script>
+// Exact counts keyed `type:id` (key events also by key).
+window.log = {};
+const bump = (key) => { log[key] = (log[key] || 0) + 1; };
+for (const type of ["pointerdown", "mousedown", "click", "focusin", "input", "change", "keydown"]) {
+  addEventListener(type, (event) => {
+    const id = event.target.id || event.target.tagName.toLowerCase();
+    bump(type === "keydown" ? `keydown:${event.key}:${id}` : `${type}:${id}`);
+  }, true);
+}
+document.getElementById("form").addEventListener("submit", (event) => {
+  event.preventDefault();
+  bump("submit");
+});
+// A checkbox whose application refuses the change.
+document.getElementById("stuck").addEventListener("click", (event) => event.preventDefault());
+// A select whose application puts its own value back.
+const pinned = document.getElementById("pinned");
+pinned.addEventListener("change", () => { pinned.value = "a"; });
+// A field that refuses focus, and one that refuses to be emptied.
+const slippery = document.getElementById("slippery");
+slippery.addEventListener("focus", () => slippery.blur());
+const sticky = document.getElementById("sticky");
+sticky.addEventListener("input", () => { if (sticky.value === "") sticky.value = "keep"; });
+// A controlled input: the application keeps its own state, updated only from
+// input events, and keeps writing it back (as framework re-renders do).
+let state = "";
+const controlled = document.getElementById("controlled");
+controlled.addEventListener("input", () => { state = controlled.value; });
+setInterval(() => { if (controlled.value !== state) controlled.value = state; }, 20);
+</script>
+</body>
+</html>

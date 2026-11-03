@@ -57,6 +57,21 @@ pub async fn ground(
     runtime: &RuntimeEpoch,
     handle: &str,
 ) -> Result<GroundedTarget, GroundingError> {
+    ground_node(page, handles, observation, runtime, handle)
+        .await
+        .map(|(target, _)| target)
+}
+
+/// [`ground`], also returning the node's object in the isolated world the
+/// checks ran in (for follow-up reads and writes that page script cannot
+/// intercept).
+pub(crate) async fn ground_node(
+    page: &Page,
+    handles: &HandleMap,
+    observation: &ObservationId,
+    runtime: &RuntimeEpoch,
+    handle: &str,
+) -> Result<(GroundedTarget, String), GroundingError> {
     let target = handles
         .resolve(observation, runtime, handle)
         .map_err(GroundingError::Handle)?;
@@ -147,10 +162,13 @@ pub async fn ground(
     {
         return Err(GroundingError::Occluded);
     }
-    Ok(GroundedTarget {
-        backend_node_id: backend,
-        point,
-    })
+    Ok((
+        GroundedTarget {
+            backend_node_id: backend,
+            point,
+        },
+        object.to_owned(),
+    ))
 }
 
 /// Runs in the isolated world: does the point hit this node or a descendant?
@@ -178,8 +196,9 @@ fn rendered(reply: Result<Value, RuntimeError>) -> Result<Value, GroundingError>
     }
 }
 
-/// Call `function` on `object` by value; a thrown exception is an error.
-async fn call_on(
+/// Call `function` on `object` by value, awaiting a returned promise; a
+/// thrown exception or rejection is an error.
+pub(crate) async fn call_on(
     page: &Page,
     object: &str,
     function: &str,
@@ -193,6 +212,7 @@ async fn call_on(
             "functionDeclaration": function,
             "arguments": arguments,
             "returnByValue": true,
+            "awaitPromise": true,
         }),
     )
     .await?;
@@ -282,7 +302,7 @@ fn axis_aligned(corners: &[f64; 8]) -> Option<CssRect> {
     })
 }
 
-fn malformed(why: &str) -> GroundingError {
+pub(crate) fn malformed(why: &str) -> GroundingError {
     GroundingError::Runtime(RuntimeError::Cdp(CdpError::InvalidMessage(why.to_owned())))
 }
 
