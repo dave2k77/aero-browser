@@ -6,7 +6,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use aero_core::ids::{CdpSessionId, TargetId};
+use aero_core::ids::{CdpSessionId, DocumentEpoch, FrameId, TargetId};
 use serde_json::{Value, json};
 
 use tokio::time::Instant;
@@ -47,6 +47,14 @@ pub struct NavigationOutcome {
     /// DOMContentLoaded, 200 ms without DOM mutations and two animation
     /// frames happened before the stability cap.
     pub stable: bool,
+}
+
+/// The page's main frame and its current document generation (the frame's
+/// `loaderId`, which changes on every cross-document navigation).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MainFrame {
+    pub frame: FrameId,
+    pub document: DocumentEpoch,
 }
 
 /// One attached tab.
@@ -103,6 +111,26 @@ impl Page {
             result = work => Some(result),
             () = self.registry.until_detached(&self.target, &self.session) => None,
         }
+    }
+
+    /// The main frame and its current document generation.
+    pub async fn main_frame(&self) -> Result<MainFrame, RuntimeError> {
+        let tree = self.call("Page.getFrameTree", json!({})).await?;
+        let frame = &tree["frameTree"]["frame"];
+        let text = |key: &str| {
+            frame[key]
+                .as_str()
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| {
+                    RuntimeError::Cdp(CdpError::InvalidMessage(format!(
+                        "main frame without {key}"
+                    )))
+                })
+        };
+        Ok(MainFrame {
+            frame: FrameId::from(text("id")?),
+            document: DocumentEpoch::from(text("loaderId")?),
+        })
     }
 
     /// Evaluate `expression` (by value, awaiting promises) with default bounds

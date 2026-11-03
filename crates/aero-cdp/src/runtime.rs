@@ -29,10 +29,10 @@ use std::sync::{Arc, Mutex, mpsc};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use aero_core::ids::TargetId;
+use aero_core::ids::{RuntimeEpoch, TargetId};
 
 use crate::evaluate::EvaluateError;
-use crate::launcher::SandboxSpec;
+use crate::launcher::{SandboxSpec, Viewport};
 use crate::page::Page;
 use crate::target_registry::{AttachError, TargetInfo, TargetRegistry};
 use crate::{CdpConnection, CdpError, TransportLimits};
@@ -168,11 +168,19 @@ pub struct BrowserRuntime {
     registry: TargetRegistry,
     connection: Arc<CdpConnection>,
     process: Option<BrowserProcess>,
+    epoch: RuntimeEpoch,
+    viewport: Viewport,
 }
 
 impl BrowserRuntime {
-    /// Launch, connect, and start target discovery.
-    pub async fn start(spec: &SandboxSpec, limits: LaunchLimits) -> Result<Self, RuntimeError> {
+    /// Launch, connect, and start target discovery. `epoch` identifies this
+    /// runtime generation (the B06 runtime directory's epoch); observations
+    /// and handles are bound to it.
+    pub async fn start(
+        spec: &SandboxSpec,
+        limits: LaunchLimits,
+        epoch: RuntimeEpoch,
+    ) -> Result<Self, RuntimeError> {
         // On any later error the launched process is dropped, which tears the
         // sandbox down.
         let process = BrowserProcess::launch(spec, limits)
@@ -185,7 +193,14 @@ impl BrowserRuntime {
             registry,
             connection,
             process: Some(process),
+            epoch,
+            viewport: spec.viewport(),
         })
+    }
+
+    /// This runtime generation.
+    pub fn epoch(&self) -> &RuntimeEpoch {
+        &self.epoch
     }
 
     /// The browser-level connection (no session). Page methods sent here fail:
@@ -237,12 +252,25 @@ impl BrowserRuntime {
             .attach(target)
             .await
             .map_err(RuntimeError::Attach)?;
-        Ok(Page::new(
+        let page = Page::new(
             Arc::clone(self.registry.connection()),
             self.registry.handle(),
             target.clone(),
             session,
-        ))
+        );
+        // `--window-size` sizes the window, not the page: apply the root
+        // viewport (implementation plan §4: CSS px at device scale factor 1).
+        page.call(
+            "Emulation.setDeviceMetricsOverride",
+            serde_json::json!({
+                "width": self.viewport.width,
+                "height": self.viewport.height,
+                "deviceScaleFactor": 1,
+                "mobile": false,
+            }),
+        )
+        .await?;
+        Ok(page)
     }
 
     /// Stop the registry, close the connection and tear the sandbox down.

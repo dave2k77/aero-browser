@@ -197,6 +197,7 @@ pub struct SandboxSpec {
     args: Vec<OsString>,
     devtools_active_port: PathBuf,
     limits: Vec<IsolationLimit>,
+    viewport: Viewport,
 }
 
 impl SandboxSpec {
@@ -359,6 +360,7 @@ impl SandboxSpec {
             args,
             devtools_active_port: profile.join("DevToolsActivePort"),
             limits,
+            viewport: request.viewport,
         })
     }
 
@@ -378,6 +380,11 @@ impl SandboxSpec {
     }
 
     /// Known weaknesses of this sandbox.
+    /// The requested root viewport, applied to each attached page (D02).
+    pub fn viewport(&self) -> Viewport {
+        self.viewport
+    }
+
     pub fn isolation_limits(&self) -> &[IsolationLimit] {
         &self.limits
     }

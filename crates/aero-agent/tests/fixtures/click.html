@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>AeroBrowser click fixture</title>
+<style>
+body { margin: 8px; }
+#cover { position: absolute; left: 0; top: 200px; width: 300px; height: 60px; background: rgba(0, 0, 0, 0.3); }
+#covered { position: absolute; left: 10px; top: 210px; }
+#tilt { transform: rotate(30deg); display: inline-block; margin: 40px; }
+#far { display: block; margin-top: 2000px; }
+</style>
+</head>
+<body>
+<button id="plain">Plain <span>inner</span></button>
+<button id="filled"><span style="display: block; padding: 12px 24px">Filled</span></button>
+<button id="covered">Covered</button>
+<div id="cover"></div>
+<div id="tilt"><button id="rotated">Rotated</button></div>
+<button id="disabled" disabled>Disabled</button>
+<button id="far">Far</button>
+<script>
+// Exact per-element counts for every pointer, mouse and click event.
+window.counts = {};
+window.clicks = [];
+for (const type of ["pointermove", "pointerdown", "pointerup", "mousemove", "mousedown", "mouseup", "click",
+                    "dblclick", "auxclick", "contextmenu"]) {
+  addEventListener(type, (event) => {
+    const owner = event.target.closest("[id]");
+    const key = type + ":" + (owner ? owner.id : "document");
+    counts[key] = (counts[key] || 0) + 1;
+    if (type === "click" && owner) {
+      const r = owner.getBoundingClientRect();
+      clicks.push({ id: owner.id, tag: event.target.tagName, x: event.clientX, y: event.clientY,
+                    left: r.left, top: r.top, right: r.right, bottom: r.bottom });
+    }
+  }, true);
+}
+// A hostile page: break the primitives a page-world hit test would rely on.
+Document.prototype.elementFromPoint = function () { return document.getElementById("plain"); };
+Node.prototype.contains = function () { return true; };
+</script>
+</body>
+</html>

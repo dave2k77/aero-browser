@@ -43,8 +43,9 @@ impl BrowserHarness {
         let lease = state
             .acquire_task(&TaskId::from("fixture-task"))
             .map_err(|e| format!("task lease: {e:?}"))?;
+        let epoch = RuntimeEpoch::from("epoch-1");
         let runtime = lease
-            .create_runtime(&RunId::from("fixture-run"), &RuntimeEpoch::from("epoch-1"))
+            .create_runtime(&RunId::from("fixture-run"), &epoch)
             .map_err(|e| format!("runtime directories: {e:?}"))?;
         let run_directory = runtime
             .profile_directory()
@@ -64,7 +65,7 @@ impl BrowserHarness {
             locale: "C.UTF-8".into(),
         })
         .map_err(|e| format!("sandbox: {e}"))?;
-        let browser = BrowserRuntime::start(&spec, LaunchLimits::default())
+        let browser = BrowserRuntime::start(&spec, LaunchLimits::default(), epoch)
             .await
             .map_err(|e| format!("browser runtime: {e} ({e:?})"))?;
         Ok(Self {

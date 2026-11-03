@@ -521,3 +521,347 @@ async fn navigation_and_stability_deadlines() {
     fixture.shutdown().await.expect("teardown");
     assert_eq!(support::sandbox_processes(), Vec::<u32>::new());
 }
+
+/// D02 helpers: the click fixture, attached and loaded, and exact counts.
+#[cfg(feature = "browser-tests")]
+mod clicks {
+    use std::time::Duration;
+
+    use aero_cdp::page::{NavigationLimits, Page};
+    use aero_core::ids::ObservationId;
+    use aero_perception::observation::{Observation, observe_page};
+    use serde_json::{Map, Value};
+
+    use crate::support::Fixture;
+
+    pub async fn open(fixture: &Fixture) -> Page {
+        let runtime = fixture.runtime();
+        let tab = runtime.wait_for_tab(Duration::from_secs(10)).await.unwrap();
+        let page = runtime.attach(&tab.target_id).await.unwrap();
+        load(fixture, &page).await;
+        page
+    }
+
+    pub async fn load(fixture: &Fixture, page: &Page) {
+        page.navigate_and_wait(
+            &fixture.server.url("click.html"),
+            &NavigationLimits::default(),
+        )
+        .await
+        .expect("click fixture loads");
+    }
+
+    pub async fn observe(fixture: &Fixture, page: &Page, id: &str) -> Observation {
+        observe_page(
+            page,
+            ObservationId::from(id),
+            fixture.runtime().epoch().clone(),
+        )
+        .await
+        .expect("observation of the live page")
+    }
+
+    /// The handle of the one button named `name`.
+    pub fn button(observation: &Observation, name: &str) -> String {
+        let mut found: Vec<String> = observation
+            .handles()
+            .iter()
+            .filter(|(_, target)| target.role == "button" && target.name == name)
+            .map(|(handle, _)| handle.to_string())
+            .collect();
+        assert_eq!(
+            found.len(),
+            1,
+            "one button {name:?} in:\n{}",
+            observation.text()
+        );
+        found.remove(0)
+    }
+
+    /// Every pointer/mouse/click event so far, keyed `type:element-id`.
+    pub async fn counts(page: &Page) -> Map<String, Value> {
+        let text = page
+            .evaluate("JSON.stringify(window.counts)")
+            .await
+            .unwrap();
+        serde_json::from_str(text.as_str().unwrap()).unwrap()
+    }
+
+    pub fn expected(id: &str) -> Map<String, Value> {
+        [
+            "pointermove",
+            "mousemove",
+            "pointerdown",
+            "mousedown",
+            "pointerup",
+            "mouseup",
+            "click",
+        ]
+        .iter()
+        .map(|kind| (format!("{kind}:{id}"), Value::from(1)))
+        .collect()
+    }
+}
+
+/// D02: one grounded click is exactly one move/press/release sequence on the
+/// target; the root viewport is the configured 1280×800.
+#[cfg(feature = "browser-tests")]
+#[tokio::test]
+async fn click_has_one_event_sequence() {
+    let _serial = support::serial().await;
+    let fixture = support::Fixture::start()
+        .await
+        .expect("required native browser fixture failed to start");
+    let runtime = fixture.runtime();
+    let page = clicks::open(&fixture).await;
+    assert_eq!(
+        page.evaluate("[innerWidth, innerHeight, devicePixelRatio]")
+            .await,
+        Ok(serde_json::json!([1280, 800, 1])),
+        "the configured root viewport is in effect"
+    );
+    let observation = clicks::observe(&fixture, &page, "obs-1").await;
+    let plain = clicks::button(&observation, "Plain inner");
+    aero_executor::click_handle(
+        &page,
+        observation.handles(),
+        observation.id(),
+        runtime.epoch(),
+        &plain,
+    )
+    .await
+    .expect("grounded click");
+    assert_eq!(clicks::counts(&page).await, clicks::expected("plain"));
+
+    // The press lands on a child that fills the button: a hit on a
+    // descendant is still a hit on the target.
+    let filled = clicks::button(&observation, "Filled");
+    aero_executor::click_handle(
+        &page,
+        observation.handles(),
+        observation.id(),
+        runtime.epoch(),
+        &filled,
+    )
+    .await
+    .expect("grounded click on a filled button");
+    let mut both = clicks::expected("plain");
+    both.extend(clicks::expected("filled"));
+    assert_eq!(clicks::counts(&page).await, both);
+    let last = page
+        .evaluate("window.clicks[window.clicks.length - 1]")
+        .await
+        .unwrap();
+    assert_eq!(
+        (&last["id"], &last["tag"]),
+        (&"filled".into(), &"SPAN".into()),
+        "{last}"
+    );
+
+    drop(page);
+    fixture.shutdown().await.expect("teardown");
+    assert_eq!(support::sandbox_processes(), Vec::<u32>::new());
+}
+
+/// D02: a target below the fold is scrolled into view and measured again; the
+/// press lands inside its post-scroll box.
+#[cfg(feature = "browser-tests")]
+#[tokio::test]
+async fn scroll_remeasures_target() {
+    let _serial = support::serial().await;
+    let fixture = support::Fixture::start()
+        .await
+        .expect("required native browser fixture failed to start");
+    let runtime = fixture.runtime();
+    let page = clicks::open(&fixture).await;
+    let before = page
+        .evaluate("document.getElementById('far').getBoundingClientRect().top")
+        .await
+        .unwrap();
+    assert!(
+        before.as_f64().unwrap() > 1500.0,
+        "starts far below the fold: {before}"
+    );
+    let observation = clicks::observe(&fixture, &page, "obs-1").await;
+    let far = clicks::button(&observation, "Far");
+    let grounded = aero_executor::click_handle(
+        &page,
+        observation.handles(),
+        observation.id(),
+        runtime.epoch(),
+        &far,
+    )
+    .await
+    .expect("grounded click");
+    assert_eq!(clicks::counts(&page).await, clicks::expected("far"));
+    let recorded = page.evaluate("window.clicks[0]").await.unwrap();
+    let (x, y) = grounded.point.coordinates();
+    let num = |key: &str| recorded[key].as_f64().unwrap();
+    assert_eq!(recorded["id"], "far");
+    assert!(num("top") < 800.0, "scrolled into view: {recorded}");
+    assert!(
+        num("left") < x && x < num("right") && num("top") < y && y < num("bottom"),
+        "{recorded} vs ({x}, {y})"
+    );
+    assert!(
+        (num("x") - x).abs() <= 1.0 && (num("y") - y).abs() <= 1.0,
+        "{recorded} vs ({x}, {y})"
+    );
+
+    drop(page);
+    fixture.shutdown().await.expect("teardown");
+    assert_eq!(support::sandbox_processes(), Vec::<u32>::new());
+}
+
+/// D02: handles from an earlier document, a removed node, another observation
+/// or another runtime generation are refused before any input is sent.
+#[cfg(feature = "browser-tests")]
+#[tokio::test]
+async fn stale_observation_cannot_click() {
+    use aero_core::ids::{ObservationId, RuntimeEpoch};
+    use aero_executor::ClickError;
+    use aero_executor::target::GroundingError;
+    use aero_perception::observation::HandleError;
+
+    let _serial = support::serial().await;
+    let fixture = support::Fixture::start()
+        .await
+        .expect("required native browser fixture failed to start");
+    let runtime = fixture.runtime();
+    let page = clicks::open(&fixture).await;
+    let click = |observation: &aero_perception::observation::Observation,
+                 id: ObservationId,
+                 epoch: RuntimeEpoch| {
+        let handle = clicks::button(observation, "Plain inner");
+        let page = &page;
+        let handles = observation.handles().clone();
+        async move { aero_executor::click_handle(page, &handles, &id, &epoch, &handle).await }
+    };
+
+    // Same URL, new document: the old observation is stale.
+    let old = clicks::observe(&fixture, &page, "obs-1").await;
+    clicks::load(&fixture, &page).await;
+    assert_eq!(
+        click(&old, old.id().clone(), runtime.epoch().clone())
+            .await
+            .err(),
+        Some(ClickError::Grounding(GroundingError::StaleDocument))
+    );
+    assert!(clicks::counts(&page).await.is_empty());
+
+    // The node was removed after the observation.
+    let fresh = clicks::observe(&fixture, &page, "obs-2").await;
+    page.evaluate("document.getElementById('plain').remove(), 1")
+        .await
+        .unwrap();
+    assert_eq!(
+        click(&fresh, fresh.id().clone(), runtime.epoch().clone())
+            .await
+            .err(),
+        Some(ClickError::Grounding(GroundingError::NodeGone))
+    );
+
+    // Presented for another observation, or after the runtime was replaced.
+    clicks::load(&fixture, &page).await;
+    let current = clicks::observe(&fixture, &page, "obs-3").await;
+    assert_eq!(
+        click(
+            &current,
+            ObservationId::from("obs-2"),
+            runtime.epoch().clone()
+        )
+        .await
+        .err(),
+        Some(ClickError::Grounding(GroundingError::Handle(
+            HandleError::OtherObservation
+        )))
+    );
+    assert_eq!(
+        click(
+            &current,
+            current.id().clone(),
+            RuntimeEpoch::from("epoch-0")
+        )
+        .await
+        .err(),
+        Some(ClickError::Grounding(GroundingError::Handle(
+            HandleError::OtherRuntime
+        )))
+    );
+    assert!(
+        clicks::counts(&page).await.is_empty(),
+        "no input reached the page"
+    );
+
+    drop(page);
+    fixture.shutdown().await.expect("teardown");
+    assert_eq!(support::sandbox_processes(), Vec::<u32>::new());
+}
+
+/// D02: covered, disabled and transformed targets are refused with no input at
+/// all, even though page script has replaced `elementFromPoint` and
+/// `contains` to make a page-world hit test lie.
+#[cfg(feature = "browser-tests")]
+#[tokio::test]
+async fn occluded_target_is_rejected() {
+    use aero_executor::ClickError;
+    use aero_executor::target::GroundingError;
+
+    let _serial = support::serial().await;
+    let fixture = support::Fixture::start()
+        .await
+        .expect("required native browser fixture failed to start");
+    let runtime = fixture.runtime();
+    let page = clicks::open(&fixture).await;
+    let observation = clicks::observe(&fixture, &page, "obs-1").await;
+    for (name, refusal) in [
+        ("Covered", GroundingError::Occluded),
+        ("Disabled", GroundingError::Disabled),
+        ("Rotated", GroundingError::UnsupportedTransform),
+    ] {
+        let handle = clicks::button(&observation, name);
+        assert_eq!(
+            aero_executor::click_handle(
+                &page,
+                observation.handles(),
+                observation.id(),
+                runtime.epoch(),
+                &handle
+            )
+            .await
+            .err(),
+            Some(ClickError::Grounding(refusal)),
+            "{name}"
+        );
+    }
+    assert!(
+        clicks::counts(&page).await.is_empty(),
+        "no input reached the page"
+    );
+
+    // A zoomed visual viewport makes CSS boxes and input coordinates disagree.
+    page.call(
+        "Emulation.setPageScaleFactor",
+        serde_json::json!({ "pageScaleFactor": 2 }),
+    )
+    .await
+    .unwrap();
+    let plain = clicks::button(&observation, "Plain inner");
+    assert_eq!(
+        aero_executor::click_handle(
+            &page,
+            observation.handles(),
+            observation.id(),
+            runtime.epoch(),
+            &plain
+        )
+        .await
+        .err(),
+        Some(ClickError::Grounding(GroundingError::ViewportScaled))
+    );
+    assert!(clicks::counts(&page).await.is_empty());
+
+    drop(page);
+    fixture.shutdown().await.expect("teardown");
+    assert_eq!(support::sandbox_processes(), Vec::<u32>::new());
+}

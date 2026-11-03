@@ -23,10 +23,13 @@
 
 use std::collections::{HashMap, HashSet};
 
+use aero_cdp::page::Page;
+use aero_cdp::runtime::RuntimeError;
 use aero_core::ids::{DocumentEpoch, FrameId, ObservationId, RuntimeEpoch};
 use aero_core::types::ElementHandle;
+use serde_json::json;
 
-use crate::axtree::{AxNode, AxTree, Checked};
+use crate::axtree::{AxError, AxNode, AxTree, Checked};
 
 /// Largest rendered observation, UTF-8 bytes (implementation plan §4).
 pub const MAX_OBSERVATION_BYTES: usize = 16 * 1024;
@@ -251,6 +254,62 @@ impl Observation {
     pub fn truncation(&self) -> Truncation {
         self.truncation
     }
+}
+
+/// Why a live page could not be observed.
+#[derive(Debug, PartialEq)]
+pub enum PageObserveError {
+    Runtime(RuntimeError),
+    Tree(AxError),
+    Observe(ObserveError),
+    /// The main frame's document changed while the tree was being read.
+    DocumentChanged,
+}
+
+impl std::fmt::Display for PageObserveError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Runtime(error) => write!(f, "browser error: {error}"),
+            Self::Tree(error) => write!(f, "{error}"),
+            Self::Observe(error) => write!(f, "{error}"),
+            Self::DocumentChanged => f.write_str("the document changed during observation"),
+        }
+    }
+}
+
+impl std::error::Error for PageObserveError {}
+
+/// Observe the page's main frame (D02; iframe trees are D04). Handles are
+/// bound to `id`, `runtime` and the main frame's current document epoch.
+pub async fn observe_page(
+    page: &Page,
+    id: ObservationId,
+    runtime: RuntimeEpoch,
+) -> Result<Observation, PageObserveError> {
+    let before = page.main_frame().await.map_err(PageObserveError::Runtime)?;
+    let reply = page
+        .call("Accessibility.getFullAXTree", json!({}))
+        .await
+        .map_err(PageObserveError::Runtime)?;
+    let tree = crate::axtree::parse_tree(&reply).map_err(PageObserveError::Tree)?;
+    // A navigation between the two reads would bind the new document's nodes
+    // to the old epoch (or the reverse).
+    let after = page.main_frame().await.map_err(PageObserveError::Runtime)?;
+    if after != before {
+        return Err(PageObserveError::DocumentChanged);
+    }
+    observe(ObservationInput {
+        id,
+        runtime,
+        root: before.frame.clone(),
+        frames: vec![FrameTree {
+            frame: before.frame,
+            document: before.document,
+            tree,
+        }],
+        links: Vec::new(),
+    })
+    .map_err(PageObserveError::Observe)
 }
 
 /// Build an observation from frame trees.

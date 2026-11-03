@@ -1,8 +1,40 @@
 # AeroBrowser — implementation handoff
 
-Document-set revision: 2.30. Current checkpoint: chain batch CH-14 (D01) below, uncommitted and ready for review. Everything through 8f7fb54 (CH-13, C06) is committed and pushed. Prior checkpoints below are historical where their next actions or test counts differ.
+Document-set revision: 2.32. Current checkpoint: chain batch CH-15 (D02) below, uncommitted and ready for review. Everything through a465acc (CH-14, D01) is committed and pushed. Prior checkpoints below are historical where their next actions or test counts differ.
 
-## Current chain batch CH-14 checkpoint
+## Current chain batch CH-15 checkpoint
+
+The owner said “yes, go ahead” to committing D01 and starting D02, then approved the D02 plan (including the viewport fix and reading the plan's "geometry only for retained action candidates" as "measure only the target being acted on"). D01 was committed as a465acc and pushed (remote main read back at the same SHA).
+
+CH-15 — D02 grounded clicks, uncommitted, WSL2 evidence:
+
+- `crates/aero-cdp`: `BrowserRuntime::start(spec, limits, epoch)` keeps the B06 `RuntimeEpoch` (`epoch()`); `SandboxSpec::viewport()`; `BrowserRuntime::attach` applies it with `Emulation.setDeviceMetricsOverride` (BUG-005); `Page::main_frame() -> MainFrame { frame, document }`, the document epoch being the main frame's `loaderId`.
+- `crates/aero-perception/src/observation.rs`: `observe_page(page, id, runtime)` reads `main_frame`, `Accessibility.getFullAXTree`, then `main_frame` again, refusing `DocumentChanged` in between; main frame only.
+- `crates/aero-executor/src/target.rs`: `ground` and its ordered refusals (`Handle`, `StaleDocument`, `NodeGone`, `Disabled`, `NotRendered`, `ViewportScaled`, `UnsupportedTransform`, `OffViewport`, `Occluded`, `Runtime`), each before any input. The node is resolved into a fresh isolated world; the hit test (`elementFromPoint` on the node's root, then identity or `contains`) runs there, so page script replacing those primitives cannot fake it. `visible_point`/`axis_aligned` are pure and unit-tested.
+- `crates/aero-executor/src/dispatcher.rs`: exactly one `mouseMoved`/`mousePressed`/`mouseReleased` (left, click count 1); failure before the press is `NotStarted`, after it `Uncertain` (never retried). `aero_executor::click_handle` = ground + click.
+- Fixture `crates/aero-agent/tests/fixtures/click.html`: capture-phase per-element counters for pointer, mouse, click, dblclick, auxclick and contextmenu events plus a click log (target tag, coordinates, box at click time); hostile replacements of `Document.prototype.elementFromPoint` and `Node.prototype.contains`.
+- Tests: geometry unit tests `grounding_uses_the_centre_of_an_axis_aligned_box`, `grounding_clips_to_the_viewport_and_skips_hidden_parts`, `grounding_rejects_transforms_missing_boxes_and_bad_replies`; scenarios `click_has_one_event_sequence`, `scroll_remeasures_target`, `stale_observation_cannot_click`, `occluded_target_is_rejected`. Red was observed in layers: unit tests and the viewport assertion against stubs, the scenarios first at the `observe_page` stub, then (after it was implemented) at the `ground` stub. Added after the implementation, so coverage only: the 2× page-scale refusal and the press landing on a filling `<span>` child. 20 consecutive full scenario runs passed (15, then 5 after the fixture change).
+- Mutation pass (`/home/davia/.hermes/cache/scratch/aero-d02-mutants.py`, background, per-mutant sandbox cleanup): 18 defects, 17 caught. "Descendant hits refused" was missed at first because the plain button's centre lands on the button itself; the filled-child case now catches it. The survivor is `observe_page`'s mid-read navigation guard: a race no deterministic test reaches.
+- Viewport finding filed as BUG-005 (tracker) and fixed here.
+
+Limits: main frame only (D04/D05); the hit test and dispatch are separate protocol calls, so a page can still move the target between them; each grounding creates a new isolated world; WSL2 only (ENV-004); the `Uncertain` dispatch path is untested (it needs an injected protocol failure).
+
+Next by plan order: D03 Unicode text and control actions (`unicode_type_clear_and_enter`, `typing_does_not_double_click`, `select_and_checkbox_are_verified`).
+
+### D02 planning record
+
+The owner said “yes, go ahead” to committing D01 and starting D02. D01 was committed as a465acc and pushed (remote main read back at the same SHA).
+
+Spike (throwaway test and fixture, deleted in the same command; design input, not test evidence) — Chrome 156, a page with a plain button containing a `<span>`, a button under a translucent overlay, a button in a `rotate(30deg)` container, a disabled button, a button 2,000 px below the fold, capture-phase counters for pointer/mouse/click events, and page script replacing `Document.prototype.elementFromPoint` and `Node.prototype.contains`:
+
+- `DOM.getContentQuads` is in root-viewport CSS pixels and changes after `DOM.scrollIntoViewIfNeeded` (the far button moved from y≈2008 to y≈588), so geometry must be measured after scrolling.
+- A transformed element yields a non-axis-aligned quad; SPEC-19 requires rejecting unsupported transforms rather than clicking the quad centre.
+- `DOM.getNodeForLocation` reported "No node found" for points that were visibly inside elements after scrolling, so it is not a reliable hit test here. `document.elementFromPoint` plus `contains` evaluated on the node resolved into an isolated world (`DOM.resolveNode` with that world's `executionContextId`) gave the right answer for every case, including the overlay (hit `cover`), and was unaffected by the page replacing both prototypes.
+- One `Input.dispatchMouseEvent` move/press/release sequence produced exactly one `pointermove`, `mousemove`, `pointerdown`, `mousedown`, `pointerup`, `mouseup` and `click` on the target. On the covered button every event went to the overlay; on the disabled button pointer events fired but no `mousedown`/`click`.
+- A removed node still resolves (`isConnected` false) and has no quads. After navigation the main frame's `loaderId` changes and old backend node IDs fail with "Node with given id does not belong to the document", so the main-frame `loaderId` can serve as the document epoch.
+- The layout viewport was 1265×657 CSS px although the launcher passes `--window-size=1280,800`: the plan's 1280×800 root viewport default (§4) is not actually in effect.
+
+## Previous chain batch CH-14 checkpoint (committed a465acc)
 
 The owner said “yes, go ahead” to committing C06 and starting D01 with a plan first. C06 was committed as 8f7fb54 and pushed (remote main read back at the same SHA). With C01–C07 committed, Batch C is complete. The owner then approved the D01 plan with the provisional DEC-013 text format.
 

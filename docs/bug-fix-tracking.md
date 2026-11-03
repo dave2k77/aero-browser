@@ -73,6 +73,7 @@ The pre-N01 audit reproduced/fixed BUG-001 and three additional CLI issues below
 | BUG-002 | S2 / P1 | ready_for_review | Hermes | Diagnostic probe descendants outlive their root/timeout; dedicated group cleanup and regression tests pass locally. |
 | BUG-003 | S2 / P1 | ready_for_review | Hermes | Pin helper requires absent python alias on Python-3-only systems; explicit python3/preflight and adapter regressions pass. |
 | BUG-004 | S2 / P2 | ready_for_review | Hermes | Unbounded executable hashing can stall doctor; regular-file/1 GiB/read/deadline limits and regression tests pass. |
+| BUG-005 | S2 / P1 | ready_for_review | Hermes | Configured root viewport only sized the headless window (pages got 1265 × 657); applied per attached page with `Emulation.setDeviceMetricsOverride`; regression assertion in `click_has_one_event_sequence`. |
 
 #### BUG-001 — B02 action enum accepts positional arrays
 
@@ -107,6 +108,13 @@ The pre-N01 audit reproduced/fixed BUG-001 and three additional CLI issues below
 - Parent reproduction: `cargo test -p aero-cli --bin aero integrity_rejects_oversized_files_before_hashing -- --nocapture` executed once and failed (exit 101); a sparse 1 GiB+1 fixture was not promptly rejected. The failed filtered test process ended its hash worker; the fixture held no real browser bytes.
 - Fix: regular-file and 1 GiB metadata cap, an actual-byte read cap (including post-metadata growth), deadline checks between chunks and a separate two-second caller wait for the integrity job. Size/type/timeout failure reports browser_lock unavailable, never matched or a sandbox success.
 - Proof: oversized-file rejection, unchanged small-file digest and a deliberately blocked-job timeout test pass. Filesystem work is not joined on timeout: already blocked kernel I/O cannot be canceled by Rust threads, and the one-shot doctor's process exit ends outstanding threads. This bound is not browser-runtime recovery, file authenticity or a hard real-time scheduling guarantee. The hashing repair adds no package/pin change or real browser operation; uncommitted, ready for owner review.
+
+#### BUG-005 — Configured root viewport is not applied to pages
+
+- Scope/severity: C03/C05 runtime contract, S2/P1; the plan's default root viewport (§4: 1280 × 800 CSS px, device scale factor 1) and the launcher's `Viewport` are passed only as `--window-size`, which sizes the headless window, not the page. Grounded input (D02) reads live layout metrics, so clicks were not misplaced; observations, screenshots and any fixed-coordinate assumption were taken at an unplanned size.
+- Reproduction: the D02 spike measured a 1265 × 657 CSS px layout viewport with `--window-size=1280,800`; `click_has_one_event_sequence` then failed its `[innerWidth, innerHeight, devicePixelRatio] == [1280, 800, 1]` assertion before the fix.
+- Fix (CH-15): `SandboxSpec` keeps its requested `Viewport`; `BrowserRuntime::attach` applies it with `Emulation.setDeviceMetricsOverride` (device scale factor 1, not mobile) before returning the page, and an attach whose override fails is an error.
+- Proof: the same assertion passes against the real browser; a mutation replacing the override is caught. Uncommitted, ready for owner review with D02.
 
 ### Environment blockers
 
