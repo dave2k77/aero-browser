@@ -1,12 +1,63 @@
 # AeroBrowser — implementation handoff
 
-Document-set revision: 2.35. Current checkpoint: chain batch CH-17 (D04) below, uncommitted and ready for review. Everything through d014e8c (CH-16, D03) is committed and pushed. Prior checkpoints below are historical where their next actions or test counts differ.
+Document-set revision: 2.36. Current checkpoint: the host-migration checkpoint below (2026-11-10), committed on 2026-11-10 in three commits (fix, sandbox launcher, docs) and pushed at the owner's “yes”; take the SHAs from Git. Everything through ddc1c40 (CH-17, D04) is committed and pushed. The owner installed the sandbox launcher profile (DEC-014 accepted); all browser suites pass natively. Prior checkpoints below are historical where their next actions or test counts differ.
 
-## Current chain batch CH-17 checkpoint
+## Current checkpoint — host migration and native baseline (2026-11-10)
+
+The owner asked to sync with the repository and plan the next steps, then said “Okay, let's proceed as you recommend”: re-provision this machine (pinned Rust and the pinned test browser), re-run the baseline, reconcile the status documents, then D05. After the baseline report the owner said the WSL2 environment “was default but no longer available. This linux environment will now be the default development environment. I want you to migrate the entire project to this linux env, sort the packages required, and make changes to the code to get things working in this env.” Everything listed under “Changed” below was committed on 2026-11-10 in three commits (fix, sandbox launcher, docs) and pushed at the owner's “yes”; take the SHAs from Git.
+
+Git:
+
+- This checkout is a copy of the 2026-10-22 state (af88105) on a new machine, `/home/davianc/Documents/projects/aero-browser`. Remote main was 24 commits ahead; local main was fast-forwarded to ddc1c40 with no merge commit. D04 (CH-17) is therefore committed and pushed as ddc1c40; the CH-17 section below was written before that commit.
+- The copy had flipped 35 tracked files from mode 644 to 755 with no content change; the committed modes were restored before the fast-forward.
+- This machine has no SSH key or `known_hosts`, so the SSH remote failed. The first sync used anonymous HTTPS. After the owner logged `gh` in (HTTPS protocol, keyring) `origin` was switched to https://github.com/dave2k77/aero-browser.git; fetch and push use those credentials. No Git identity is configured on this host, so these commits used the identity of all earlier commits (dave2k77 <davianc@gmail.com>) through per-command `git -c`, not a configuration change.
+- The anonymous fetch succeeded, so the repository was publicly readable on 2026-11-10 although DEC-002 records it as private. Not changed here; the owner should confirm which is intended.
+- Work left uncommitted on the WSL2 machine after ddc1c40, and the mutation scripts kept in that machine's scratch directory (`aero-d01-mutants.py` … `aero-d04-mutants.py`), are not on this machine.
+
+Host (first native host; all earlier evidence is WSL2): Ubuntu 26.10, kernel 7.3.0-10-generic, x86_64, GNOME on Wayland; GCC 15.3.0, Bubblewrap 0.12.0, pkg-config 2.5.1, Python 3.14.9. This is not the Ubuntu 24.04 release baseline.
+
+Provisioned with the owner's approval, both outside the repository:
+
+- Rust 1.99.1 (`rustc 1.99.1 (58cf8f9c3 2026-10-13)`, `cargo 1.99.1 (5f94df478 2026-08-27)`), minimal profile with rustfmt and clippy, through the snap-packaged rustup 1.29.2. No toolchain existed before, so rustup also made 1.99.1 its default.
+- Chrome for Testing 156.0.8078.47 from the lock's download URL into `$HOME/.cache/aerobrowser/browsers/156.0.8078.47/`. The archive SHA-256 and the executable SHA-256 both equal the values in `packaging/browser-lock.json`; the archive was checked for absolute, parent-traversing and symlink entries before extraction and deleted afterwards. `--version` prints `Google Chrome for Testing 156.0.8078.47`.
+
+Baseline at ddc1c40 on this host:
+
+- `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --locked -- -D warnings` and `cargo build --workspace --locked` exit 0. The contributor documentation checker passes (12 documents).
+- `cargo test --workspace --locked`: 301 tests and 13 doctests pass, none failed or ignored, with `TMPDIR` set to a private directory under `target/`. With `TMPDIR` under `~/.hermes/cache` (mode 0775 here, umask 0002) 26 aero-agent unit tests fail with `UnsafePath`: the private-path checks refuse a group-writable, non-sticky ancestor, as designed. See [development.md](development.md#native-ubuntu-2610-host-2026-11-10).
+- `cargo test -p aero-cdp --locked --test sandbox --features browser-tests`: 8 pass, 3 fail (`launch_reaches_cdp`, `sandbox_cannot_read_host_canary`, `renderer_sandbox_remains_enabled`). The browser exits 134 with Chromium's “No usable sandbox!”. `readiness_failure_reaps_child` passes.
+- `cargo test -p aero-agent --locked --features browser-tests --test scenarios`: 0 pass, 13 fail, each at browser start with the same message. No sandbox or browser process remained afterwards.
+- Cause, filed as [ENV-005](bug-fix-tracking.md#env-005--apparmor-denies-the-nested-chromium-sandbox-on-native-ubuntu): this host's AppArmor policy runs everything started by Bubblewrap under a profile that denies all capabilities, so Chromium cannot build its own namespace sandbox inside ours. Nothing was changed to work around it: no `--no-sandbox`, no AppArmor or sysctl edit.
+- Pin helper: `bash scripts/lock-browser.sh "$AERO_CHROMIUM"` printed FAIL here because the debug-profile doctor did not finish hashing the 300,842,312-byte executable within its two-second limit (3 of 3 runs), while the release-profile doctor reported `matched_local_pin`. Filed as [BUG-006](bug-fix-tracking.md#bug-006--debug-profile-doctor-cannot-hash-the-pinned-browser-within-its-deadline) and fixed below.
+
+Migration work after the owner's second instruction:
+
+- Packages: everything the current code needs is installed (build-essential/GCC, pkg-config, bubblewrap, apparmor with `apparmor_parser`, util-linux, Python 3, git, curl, CA certificates). Not installed and not needed yet: `libdbus-1-dev` (vault feature, G01), `xvfb`, `apparmor-utils`. Nothing was installed with root; `sudo` needs the owner's password.
+- BUG-006 fix: new test `integrity_hashes_a_browser_sized_file_within_the_deadline` in `crates/aero-cli/src/doctor.rs` (a sparse 320 MiB file must hash to its known digest inside the existing limit). `cargo test -p aero-cli --locked --bin aero integrity_hashes_a_browser_sized -- --nocapture` ran it once and failed with `TimedOut` after 2.00 s. Root `Cargo.toml` now builds `sha2` optimized in the dev profile (`[profile.dev.package.sha2] opt-level = 3`); the same command passed three times in 0.16–0.17 s, and `bash scripts/lock-browser.sh "$AERO_CHROMIUM"` prints PASS in the dev profile. `Cargo.lock` is unchanged; the two-second limit and the 1 GiB bound are unchanged.
+- ENV-005 remedy, prepared but not applied: `packaging/apparmor/aerobrowser-bwrap` (the stock Bubblewrap policy, attached only to `/usr/local/libexec/aerobrowser/bwrap`, whose children keep capabilities inside their user namespaces) and `scripts/install-apparmor-profile.sh` (`install [GROUP]` / `remove`, root only). The profile compiles with `apparmor_parser --skip-kernel-load --skip-cache`; the installer refuses to run without root. Neither has been loaded or run with root, so whether Chromium's sandbox then starts is untested. No launcher or test code needed changing: the tests already take the Bubblewrap path from `AERO_BWRAP`.
+- `scripts/dev-env.sh` (to be sourced) exports `AERO_CHROMIUM` for the pinned browser and `AERO_BWRAP` when the launcher is installed, and says what is missing.
+- Gates after these changes: formatting, warning-denied Clippy and the build pass; `cargo test --workspace --locked` passes 302 tests and 13 doctests, none failed or ignored. Browser suites: see item 0 under Next (11/11 and 13/13, six runs each, after the profile was installed).
+
+Limits: one run of each suite; no repeat runs or mutation passes on this host; browser suites passed six consecutive runs natively but no mutation pass was run here; display, input, accessibility and keyring remain unexercised (ENV-004). The BUG-006 test is a timing test: it passed with a twelvefold margin here, and a much slower machine could still miss the limit, which would be a true report for that machine.
+
+Changed. Code and packaging: `Cargo.toml`, `crates/aero-cli/src/doctor.rs`, new `packaging/apparmor/aerobrowser-bwrap`, new `scripts/install-apparmor-profile.sh`, new `scripts/dev-env.sh`. Documentation: this section and the CH-17 heading and note below; the plan header and the ledger states of A04, B02–B06, N01–N04 and D04 (`ready_for_review` → `committed`, with their commit IDs); tracker ENV-005, DEC-014, BUG-006, updates to BUG-001–BUG-005, ENV-001, ENV-002, ENV-004 and DEC-002; the new host section in development.md. README.md and the CONTRIBUTING.md status paragraph still describe the 2026-10-28 state and were not touched.
+
+Next:
+
+0. Done 2026-11-10: the owner said “okay done. sudo tasks have been run.” Installed and verified 2026-11-10: the owner ran `sudo bash scripts/install-apparmor-profile.sh install`. Read back: `/usr/local/libexec/aerobrowser` is `root:davianc` mode 0750; the launcher is byte-identical to `/usr/bin/bwrap`; `/etc/apparmor.d/aerobrowser-bwrap` equals the repository file. A process started by the launcher is labelled `aerobrowser-bwrap//&aerobrowser-sandboxed (enforce)` and `unshare -U -r -m -p -f -n true` succeeds inside it; under `/usr/bin/bwrap` the label is still `bwrap//&unpriv_bwrap` and the same `unshare` still fails. With `AERO_BWRAP` set to the launcher, `cargo test -p aero-cdp --locked --test sandbox --features browser-tests` passed 11/11 (including `launch_reaches_cdp`, `sandbox_cannot_read_host_canary`, `renderer_sandbox_remains_enabled`, `readiness_failure_reaps_child`) and `cargo test -p aero-agent --locked --features browser-tests --test scenarios` passed 13/13, in six consecutive runs of each; no browser process remained. ENV-005 is verified.
+1. Superseded owner action for [DEC-014](bug-fix-tracking.md#dec-014--running-the-nested-browser-sandbox-under-apparmor-user-namespace-restrictions): review the profile and run `sudo bash scripts/install-apparmor-profile.sh install`. Then `source scripts/dev-env.sh` and run both browser suites; ENV-005 closes only if `renderer_sandbox_remains_enabled` and the rest pass. If they do not, read the AppArmor denials (`sudo journalctl -k -g apparmor`) before changing the profile. D05–D07 and every other browser-backed package wait on this.
+2. D05 frame owners and viewport coordinates, starting with its plan and spike as for D02 and D04 (`two_iframes_map_to_correct_owners`, `nested_frame_coordinate_calibration`, `transformed_frame_fails_closed`), once the sandbox starts here. Re-run D01–D04's repeat runs natively first; their mutation scripts would have to be rewritten.
+3. Packages that need no browser can proceed on this host meanwhile; by the plan's dependency schedule those are E01–E02, N06–N08, N14 and N22.
+4. Proposed follow-up, not started: doctor should detect this AppArmor condition and explain it (§7.8); it still reports `user_namespaces` and `sandbox` as `not_checked`.
+5. Owner confirmations still pending: DEC-012 (report claims format), DEC-013 (observation text format), closure of BUG-001–BUG-005, review of the BUG-006 fix, and whether Ubuntu 24.04 stays the release baseline now that development is on 26.10.
+
+## Previous chain batch CH-17 checkpoint (committed ddc1c40)
+
+Committed and pushed as ddc1c40 (remote main read at that SHA on 2026-11-10). The text below was written before the commit.
 
 The owner approved the D04 plan below (“yes, go ahead”), including using `DOM.getFrameOwner` for observation links in D04 and leaving coordinates, the decoy frame and input inside frames to D05. A session-lease interruption stopped the first attempt mid-implementation; the owner said “continue” and the work resumed from the uncommitted tree.
 
-CH-17 — D04 frame and execution-context identity, uncommitted, WSL2 evidence (details in the D04 ledger row):
+CH-17 — D04 frame and execution-context identity, WSL2 evidence (details in the D04 ledger row):
 
 - `crates/aero-cdp/src/frame_manager.rs` (new): pure `FrameGraph` plus a per-page `FrameManager` (listener, OOPIF configuration and resume, non-iframe rejection, rebuild, auto-attach off on drop).
 - `crates/aero-cdp/src/page.rs`: `frames`, `frame_call`, `frame_ax_tree`, `frame_owner`, `resync_frames`, `frame_resyncs`; `runtime.rs`: `RuntimeError::{FrameGone, FramesUnknown}`, `attach` starts the frame manager; `target_registry.rs`: module docs on the two attachment scopes.

@@ -1,10 +1,10 @@
 # Development — environment and verification
 
-Observed on 2026-10-22 in `/home/davia/projects/aero-browser`. See [handoff.md](handoff.md) for the current reviewed checkpoint and [implementation-plan.md](implementation-plan.md) for remaining work. This guide does not claim a working delegated browser/runtime yet.
+Observed on 2026-10-22 in `/home/davia/projects/aero-browser` (WSL2); a second, native host was added on 2026-11-10 and is described in [its own section](#native-ubuntu-2610-host-2026-11-10). See [handoff.md](handoff.md) for the current reviewed checkpoint and [implementation-plan.md](implementation-plan.md) for remaining work. This guide does not claim a working delegated browser/runtime yet.
 
 ## Environment and scope
 
-- Development host: Ubuntu 26.04.1 LTS under WSL2, x86_64.
+- Original development host, retired on 2026-11-10: Ubuntu 26.04.1 LTS under WSL2, x86_64. The default development host is now the native machine described in [its own section](#native-ubuntu-2610-host-2026-11-10); statements below about “this host” that predate that date refer to WSL2.
 - Release baseline remains native Ubuntu 24.04 x86_64; native X11/Wayland, keyring and sandbox compatibility have not been established by this bootstrap.
 - `rustc 1.99.1 (58cf8f9c3 2026-10-13)` and `cargo 1.99.1 (5f94df478 2026-08-27)` installed with the official rustup minimal profile; rustfmt and clippy installed. `rust-toolchain.toml` pins 1.99.1, not a moving stable channel. No older MSRV is claimed.
 - C compiler: Ubuntu GCC 15.2.0-16ubuntu1. Bubblewrap 0.11.1 already available. Node v24.18.0/npm 12.2.0 were present; no frontend is implemented or required for this batch.
@@ -131,6 +131,37 @@ pkg-config --version
 ```
 
 ENV-003 now records actual tool availability; this does not establish compatibility of future native libraries/features. Do not install desktop, keyring, model or Flatpak stacks speculatively. Ubuntu's available chromium-browser candidate is a Snap transition package; do not mistake that wrapper for a directly mounted Linux browser binary. Native sandbox/user-namespace, display/IME/accessibility, and dedicated Secret Service checks require their actual later test environments. Never add `--no-sandbox`, change AppArmor/sysctls or weaken permissions to hide a failure.
+
+## Native Ubuntu 26.10 host (2026-11-10)
+
+This is the default development host from 2026-11-10 by the owner's decision; the WSL2 host is no longer available. Observed in `/home/davianc/Documents/projects/aero-browser` at main ddc1c40. The sections above describe the original WSL2 host; this one records what differs. Counts and the full record are in the [handoff](handoff.md#current-checkpoint--host-migration-and-native-baseline-2026-11-10).
+
+- Host: Ubuntu 26.10, kernel 7.3.0-10-generic, x86_64, GNOME on Wayland; GCC 15.3.0-4ubuntu1, Bubblewrap 0.12.0, pkg-config 2.5.1, Python 3.14.9, Node v24.19.0. Not the Ubuntu 24.04 release baseline.
+- Rust: rustup 1.29.2 comes from the snap package, so `cargo`, `rustc` and `rustup` are in `/snap/bin` and the `$HOME/.cargo/bin` PATH line above is not needed. The pinned toolchain was installed with `rustup toolchain install 1.99.1 --profile minimal --component rustfmt,clippy`.
+- Browser: the pinned Chrome for Testing was provisioned again at the same `$HOME/.cache/aerobrowser/browsers/156.0.8078.47/chrome-linux64/chrome` path. Here the lock's `archive_sha256` was checked before extraction and `executable_sha256` after it; both match. The system Google Chrome 157 at `/usr/bin/google-chrome` is not the pinned browser and is not used.
+- Temporary directory: the private-path checks refuse a group- or world-writable ancestor that is not sticky. This host's umask is 0002, and a `TMPDIR` below such a directory (for example a tool cache created with mode 0775) makes 26 aero-agent unit tests fail with `UnsafePath`. That is the intended refusal, not a defect. Use a private directory whose ancestors are not writable by others:
+
+```bash
+mkdir -p -m 700 target/aero-test-tmp
+export TMPDIR="$PWD/target/aero-test-tmp"
+cargo test --workspace --locked
+```
+
+- Packages: the current code needs only what is already installed here: `build-essential`, `pkg-config`, `bubblewrap`, `apparmor` (for `apparmor_parser`), `util-linux`, `python3`, `git`, `curl` and `ca-certificates`. `libdbus-1-dev` (vault feature), `xvfb` and `apparmor-utils` are absent and not needed yet; install them when the package that needs them starts, not before.
+- Browser tests need the AeroBrowser sandbox launcher. With the stock policy AppArmor confines everything `/usr/bin/bwrap` starts with a profile that denies capabilities, so Chromium exits with “No usable sandbox!” before the DevTools endpoint exists (ENV-005 and DEC-014 in the [tracker](bug-fix-tracking.md#env-005--apparmor-denies-the-nested-chromium-sandbox-on-native-ubuntu)). Never work around that with `--no-sandbox`, a sysctl change, an edit to the stock profiles or an unconfined run. The supported remedy is the project's own profile, which the machine's owner installs once with root after reading `packaging/apparmor/aerobrowser-bwrap`:
+
+```bash
+sudo bash scripts/install-apparmor-profile.sh install
+source scripts/dev-env.sh
+cargo test -p aero-cdp --locked --test sandbox --features browser-tests -- --nocapture
+cargo test -p aero-agent --locked --features browser-tests --test scenarios -- --nocapture
+```
+
+The installer copies `/usr/bin/bwrap` to `/usr/local/libexec/aerobrowser/bwrap` in a root-owned directory that only the invoking user's group (or the named GROUP) may enter, and loads a profile for that path under which sandboxed programs keep capabilities inside their own user namespaces. Members of that group can thereby use user namespaces without the distribution's restriction; no other program is affected. Run it again after a bubblewrap update; `sudo bash scripts/install-apparmor-profile.sh remove` undoes it. `scripts/dev-env.sh` exports `AERO_CHROMIUM` and, when the launcher exists, `AERO_BWRAP`. Installed on this host on 2026-11-10; with it the sandbox suite passes 11/11 and the scenarios 13/13 (six consecutive runs each).
+
+- Pin helper: `bash scripts/lock-browser.sh "$AERO_CHROMIUM"` prints PASS here. It first reported FAIL for matching bytes because the unoptimized hash missed doctor's two-second limit on the 300 MB executable (BUG-006); the dev profile now builds `sha2` optimized.
+
+Git: this host has no SSH key; `origin` uses https://github.com/dave2k77/aero-browser.git with the `gh` CLI login for credentials. No `user.name`/`user.email` is configured here; set them (or pass `git -c`) before committing.
 
 ## Git and review
 
