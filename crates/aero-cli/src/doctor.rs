@@ -130,6 +130,12 @@ pub fn inspect(chromium: Option<PathBuf>) -> Report {
         &["bwrap"],
     ));
     let browser_lock = check_browser_pin(&browser);
+    let user_namespaces = user_namespace_check(
+        fs::read_to_string("/proc/sys/kernel/apparmor_restrict_unprivileged_userns")
+            .ok()
+            .as_deref(),
+        bubblewrap.path.as_deref().filter(|_| bubblewrap.available),
+    );
     let display_configured = ["DISPLAY", "WAYLAND_DISPLAY"]
         .iter()
         .any(|name| env::var_os(name).is_some_and(|value| !value.is_empty()));
@@ -138,10 +144,7 @@ pub fn inspect(chromium: Option<PathBuf>) -> Report {
         browser,
         bubblewrap,
         browser_lock,
-        user_namespaces: Check {
-            status: "not_checked",
-            detail: "Kernel namespace configuration alone does not prove a usable browser sandbox. Required C04 integration is not implemented yet.",
-        },
+        user_namespaces,
         sandbox: Check {
             status: "not_checked",
             detail: "Browser version and local hash are not sandbox proof. C04 must verify Bubblewrap plus Chromium renderer isolation and process cleanup.",
@@ -160,6 +163,34 @@ pub fn inspect(chromium: Option<PathBuf>) -> Report {
         },
         pkg_config: probe(resolve(None, &["pkg-config"])),
         runtime_ready: false,
+    }
+}
+
+/// AeroBrowser's AppArmor-profiled Bubblewrap copy (scripts/install-apparmor-profile.sh).
+const PROJECT_LAUNCHER: &str = "/usr/local/libexec/aerobrowser/bwrap";
+
+/// Explains whether AppArmor's user-namespace restriction (Ubuntu 23.10 and
+/// later) will stop Chromium building its sandbox inside Bubblewrap. Reports
+/// configuration only: whether the sandbox works is proven by the C04 browser
+/// tests, not here.
+fn user_namespace_check(restriction: Option<&str>, bwrap: Option<&Path>) -> Check {
+    match restriction.map(str::trim) {
+        None | Some("0") => Check {
+            status: "unrestricted",
+            detail: "AppArmor does not restrict unprivileged user namespaces on this kernel. This is configuration only; the browser sandbox is proven by the C04 browser tests.",
+        },
+        Some("1") if bwrap == Some(Path::new(PROJECT_LAUNCHER)) => Check {
+            status: "restricted_project_launcher",
+            detail: "AppArmor restricts unprivileged user namespaces, and Bubblewrap is AeroBrowser's launcher /usr/local/libexec/aerobrowser/bwrap. Whether its aerobrowser-bwrap profile is loaded is not verified here (the profile list needs root); the C04 browser tests prove it.",
+        },
+        Some("1") => Check {
+            status: "restricted",
+            detail: "AppArmor restricts unprivileged user namespaces (kernel.apparmor_restrict_unprivileged_userns=1), so Chromium cannot build its sandbox under the stock Bubblewrap profile and will exit with \"No usable sandbox!\". The machine's owner installs AeroBrowser's launcher once with `sudo bash scripts/install-apparmor-profile.sh install`; then set AERO_BWRAP=/usr/local/libexec/aerobrowser/bwrap (`source scripts/dev-env.sh`). Never use --no-sandbox.",
+        },
+        Some(_) => Check {
+            status: "unknown",
+            detail: "Unrecognized kernel.apparmor_restrict_unprivileged_userns value; the browser sandbox may not start.",
+        },
     }
 }
 
@@ -479,6 +510,39 @@ mod tests {
             sha256(&path).unwrap(),
             format!("{:x}", Sha256::digest(bytes))
         );
+    }
+
+    #[test]
+    fn userns_check_explains_the_restriction_without_the_launcher() {
+        for bwrap in [Some(Path::new("/usr/bin/bwrap")), None] {
+            let check = user_namespace_check(Some("1\n"), bwrap);
+            assert_eq!(check.status, "restricted");
+            assert!(check.detail.contains("scripts/install-apparmor-profile.sh"));
+            assert!(check.detail.contains(PROJECT_LAUNCHER));
+        }
+    }
+
+    #[test]
+    fn userns_check_recognises_the_project_launcher() {
+        let check = user_namespace_check(Some("1"), Some(Path::new(PROJECT_LAUNCHER)));
+        assert_eq!(check.status, "restricted_project_launcher");
+        // Doctor cannot read the loaded-profile list unprivileged; it must not
+        // claim the profile works.
+        assert!(check.detail.contains("not verified"));
+    }
+
+    #[test]
+    fn userns_check_reports_unrestricted_and_unknown_kernels() {
+        assert_eq!(
+            user_namespace_check(Some("0\n"), Some(Path::new("/usr/bin/bwrap"))).status,
+            "unrestricted"
+        );
+        assert_eq!(
+            user_namespace_check(None, Some(Path::new("/usr/bin/bwrap"))).status,
+            "unrestricted"
+        );
+        assert_eq!(user_namespace_check(Some("2"), None).status, "unknown");
+        assert_eq!(user_namespace_check(Some(""), None).status, "unknown");
     }
 
     #[test]
