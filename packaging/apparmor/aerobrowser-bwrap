@@ -1,0 +1,69 @@
+# AeroBrowser sandbox launcher profile.
+#
+# Ubuntu restricts unprivileged user namespaces with AppArmor
+# (kernel.apparmor_restrict_unprivileged_userns=1). The stock
+# bwrap-userns-restrict policy lets /usr/bin/bwrap build a sandbox but denies
+# every capability to whatever runs inside it. Chromium needs capabilities
+# inside its own nested user namespace to build its renderer sandbox, so under
+# the stock policy it exits with "No usable sandbox!" (tracker ENV-005).
+#
+# This profile attaches only to AeroBrowser's own copy of Bubblewrap. It is
+# the stock policy with one difference: programs started by this launcher keep
+# capabilities inside the user namespaces they create.
+#
+# Consequence, stated plainly: anyone able to execute the launcher below can
+# use user namespaces without the distribution's restriction. The installer
+# therefore puts it in a root-owned directory that only one group may enter.
+# Nothing here disables Chromium's sandbox or changes policy for any other
+# program, including /usr/bin/bwrap.
+#
+# Install or remove with scripts/install-apparmor-profile.sh (root required).
+# Mirrors /etc/apparmor.d/bwrap-userns-restrict from apparmor 6.0 on
+# Ubuntu 26.10, including the stacked child transition that Bubblewrap's
+# no-new-privileges setting requires.
+
+abi <abi/5.0>,
+
+include <tunables/global>
+
+profile aerobrowser-bwrap /usr/local/libexec/aerobrowser/bwrap flags=(attach_disconnected,mediate_deleted) {
+  allow capability,
+  allow file rwlkm /{**,},
+  allow network,
+  allow unix,
+  allow ptrace,
+  allow signal,
+  allow mqueue,
+  allow io_uring,
+  allow userns,
+  allow mount,
+  allow umount,
+  allow pivot_root,
+  allow dbus,
+
+  allow pix /** -> &aerobrowser-bwrap//&aerobrowser-sandboxed,
+
+  include if exists <local/aerobrowser-bwrap>
+}
+
+# Confines everything the launcher starts. Unlike the stock unpriv_bwrap
+# profile it does not deny capabilities.
+profile aerobrowser-sandboxed flags=(attach_disconnected,mediate_deleted) {
+  allow capability,
+  allow file rwlkm /{**,},
+  allow network,
+  allow unix,
+  allow ptrace,
+  allow signal,
+  allow mqueue,
+  allow io_uring,
+  allow userns,
+  allow mount,
+  allow umount,
+  allow pivot_root,
+  allow dbus,
+
+  allow pix /** -> &aerobrowser-sandboxed,
+
+  include if exists <local/aerobrowser-sandboxed>
+}
