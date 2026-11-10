@@ -482,6 +482,22 @@ mod tests {
     }
 
     #[test]
+    fn integrity_hashes_a_browser_sized_file_within_the_deadline() {
+        // BUG-006: the pinned browser executable is about 300 MB. The check
+        // must finish inside its own deadline in the profile `cargo run` and
+        // `scripts/lock-browser.sh` use, or a matching browser reads as
+        // unavailable.
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("browser-sized-synthetic");
+        // Sparse: 320 MiB of zeros without allocating disk blocks.
+        File::create(&path).unwrap().set_len(320 << 20).unwrap();
+        assert_eq!(
+            sha256(&path).expect("a browser-sized file is hashed within the deadline"),
+            "9942003e84c1648820149cb7b82869eb1e6515ddd04951bd2c69f9273b09c053"
+        );
+    }
+
+    #[test]
     fn integrity_rejects_oversized_files_before_hashing() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("oversized-synthetic-browser");
