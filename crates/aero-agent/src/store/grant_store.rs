@@ -16,7 +16,7 @@ pub(super) fn now_ms() -> Result<u64, StoreError> {
 }
 
 /// The task exists (else `Deleted` or `NotFound`).
-fn task_exists(c: &Connection, task: &TaskId) -> Result<(), StoreError> {
+pub(super) fn task_exists(c: &Connection, task: &TaskId) -> Result<(), StoreError> {
     let exists: bool = sql(c.query_row(
         "SELECT EXISTS(SELECT 1 FROM tasks WHERE id=?1)",
         [task.as_str()],

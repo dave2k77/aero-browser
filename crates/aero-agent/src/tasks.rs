@@ -24,6 +24,7 @@
 use crate::capabilities::{Capabilities, NetworkAccess};
 use crate::config::PrivateState;
 use crate::data_flow::{GatewayHost, GatewayLink};
+use crate::preview::Preview;
 use crate::store::StoreError;
 use crate::store::worker::{AuditPage, Journal, JournalClient, Reply, ResumeState};
 use aero_core::capability::CapabilityGrant;
@@ -259,6 +260,18 @@ impl TaskClient {
     pub fn issue_grant(&self, grant: CapabilityGrant) -> Result<Reply<()>, StoreError> {
         self.require_owner()?;
         self.journal.issue_grant(grant, "trusted_user")
+    }
+    /// Approve one commit exactly as previewed (N07). Trusted user only; the
+    /// approval is consumed by the first matching dispatch and invalidated by
+    /// any material change, a new run or a contract revision.
+    pub fn approve(
+        &self,
+        id: String,
+        preview: Preview,
+        expires_at_ms: u64,
+    ) -> Result<Reply<()>, StoreError> {
+        self.require_owner()?;
+        self.journal.approve(id, preview, expires_at_ms)
     }
     /// Revoke a live grant (N06). Trusted user only. A contract revision
     /// revokes all of the task's grants.

@@ -6,6 +6,8 @@
 
 use super::{Store, StoreError, database_error};
 use crate::budget::{BudgetRequest, BudgetSnapshot, BudgetTicket, Charges};
+#[path = "approval_store.rs"]
+mod approval_store;
 #[path = "budget_store.rs"]
 mod budget_store;
 #[path = "grant_store.rs"]
@@ -363,6 +365,23 @@ impl JournalClient {
         identifier(task_id.as_str())?;
         identifier(&id)?;
         self.submit(move |s| s.revoke_grant(&task_id, &id))
+    }
+    /// Owner-only via `TaskClient` (N07).
+    pub(crate) fn approve(
+        &self,
+        id: String,
+        preview: crate::preview::Preview,
+        expires_at_ms: u64,
+    ) -> Result<Reply<()>, StoreError> {
+        self.submit(move |s| s.approve(id, preview, expires_at_ms))
+    }
+    /// Via `Capabilities::gate` only (N07).
+    pub(crate) fn consume_approval(
+        &self,
+        id: String,
+        current: crate::preview::Preview,
+    ) -> Result<Reply<Result<(), crate::approval::Refusal>>, StoreError> {
+        self.submit(move |s| s.consume_approval(id, current))
     }
     /// Via `Capabilities` only (N06).
     pub(crate) fn authorize_effect(

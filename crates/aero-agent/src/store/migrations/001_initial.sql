@@ -181,6 +181,15 @@ CREATE TABLE approvals (
     consumed INTEGER NOT NULL DEFAULT 0 CHECK(consumed IN (0,1)),
     FOREIGN KEY(session_id, task_id, contract_revision) REFERENCES sessions(id, task_id, contract_revision) ON DELETE CASCADE
 ) STRICT;
+CREATE TRIGGER immutable_approval_payload
+BEFORE UPDATE OF id, session_id, task_id, contract_revision, observation_id, material_effect_digest, preview_json, origin, expires_at ON approvals
+BEGIN SELECT RAISE(ABORT, 'approval payload is immutable'); END;
+CREATE TRIGGER approval_consumption_is_final BEFORE UPDATE OF consumed ON approvals
+WHEN OLD.consumed = 1 AND NEW.consumed <> 1
+BEGIN SELECT RAISE(ABORT, 'approval consumption is final'); END;
+CREATE TRIGGER no_approval_replacement BEFORE INSERT ON approvals
+WHEN EXISTS(SELECT 1 FROM approvals WHERE id=NEW.id)
+BEGIN SELECT RAISE(ABORT, 'approval already exists'); END;
 CREATE TABLE evidence (
     id TEXT PRIMARY KEY NOT NULL CHECK(length(id) > 0),
     task_id TEXT NOT NULL,

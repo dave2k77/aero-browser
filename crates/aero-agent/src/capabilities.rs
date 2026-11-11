@@ -107,6 +107,20 @@ impl Capabilities {
     }
 }
 
+impl Capabilities {
+    pub(crate) fn private_network(&self) -> bool {
+        self.network == NetworkAccess::PrivateNetwork
+    }
+    /// Consume approval `id` for `current` (N07); see `approval`.
+    pub(crate) fn consume(
+        &self,
+        id: String,
+        current: crate::preview::Preview,
+    ) -> Result<Reply<Result<(), crate::approval::Refusal>>, StoreError> {
+        self.journal.consume_approval(id, current)
+    }
+}
+
 /// Does `grant` (with `quota_used` spent) cover `effect` now?
 pub(crate) fn evaluate(
     grant: &CapabilityGrant,
