@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Calibration frame</title>
+<style>body { margin: 0; height: 600px; position: relative; } #pay { position: absolute; left: 30px; top: 100px; width: 80px; height: 30px; }</style>
+</head>
+<body>
+<button id="pay">Pay</button>
+<script>
+window.counts = {};
+window.clicks = [];
+for (const type of ["pointermove", "pointerdown", "pointerup", "mousemove", "mousedown", "mouseup", "click",
+                    "dblclick", "auxclick", "contextmenu"]) {
+  addEventListener(type, (event) => {
+    const owner = event.target.closest("[id]");
+    const key = type + ":" + (owner ? owner.id : "document");
+    counts[key] = (counts[key] || 0) + 1;
+    if (type === "click" && owner) {
+      const r = owner.getBoundingClientRect();
+      clicks.push({ id: owner.id, x: event.clientX, y: event.clientY,
+                    left: r.left, top: r.top, right: r.right, bottom: r.bottom });
+    }
+  }, true);
+}
+// A hostile page: break the primitives a page-world hit test would rely on.
+Document.prototype.elementFromPoint = function () { return null; };
+Node.prototype.contains = function () { return false; };
+</script>
+</body>
+</html>

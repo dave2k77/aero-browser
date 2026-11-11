@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Merchant</title>
+<style>
+body { margin: 0; height: 2000px; position: relative; }
+iframe { position: absolute; background: white; }
+#decoy { left: 10px; top: 10px; width: 300px; height: 120px; border: 0; }
+#gateway { left: 40px; top: 300px; width: 420px; height: 200px; border: 3px solid green; padding: 9px; }
+#pay { position: absolute; left: 600px; top: 40px; }
+</style>
+</head>
+<body>
+<button id="pay">Pay</button>
+<!-- D05: the first visible frame is a decoy with an identically named button. -->
+<iframe id="decoy" title="Offers" src="merchant-decoy.html"></iframe>
+<script>
+// The payment frame is cross-site: same port, other host name.
+const gateway = document.createElement("iframe");
+gateway.id = "gateway";
+gateway.title = "Payment";
+gateway.src = `http://localhost:${location.port}/gateway.html`;
+document.body.appendChild(gateway);
+window.counts = {};
+window.clicks = [];
+for (const type of ["pointermove", "pointerdown", "pointerup", "mousemove", "mousedown", "mouseup", "click",
+                    "dblclick", "auxclick", "contextmenu"]) {
+  addEventListener(type, (event) => {
+    const owner = event.target.closest("[id]");
+    const key = type + ":" + (owner ? owner.id : "document");
+    counts[key] = (counts[key] || 0) + 1;
+    if (type === "click" && owner) {
+      const r = owner.getBoundingClientRect();
+      clicks.push({ id: owner.id, x: event.clientX, y: event.clientY,
+                    left: r.left, top: r.top, right: r.right, bottom: r.bottom });
+    }
+  }, true);
+}
+</script>
+</body>
+</html>

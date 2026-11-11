@@ -1381,6 +1381,109 @@ mod frames {
             .map(|info| info.frame.clone())
             .collect()
     }
+
+    /// The `id` attribute of the `<iframe>` that owns `info`, read in the
+    /// parent frame's session.
+    pub async fn owner_id(page: &Page, info: &FrameInfo) -> String {
+        let owner = page.frame_owner(&info.frame).await.expect("frame owner");
+        let parent = info.parent.as_ref().expect("a child frame");
+        let described = page
+            .frame_call(
+                parent,
+                "DOM.describeNode",
+                json!({ "backendNodeId": owner }),
+            )
+            .await
+            .expect("owner description");
+        let attributes = described["node"]["attributes"]
+            .as_array()
+            .expect("owner attributes");
+        attributes
+            .chunks(2)
+            .find(|pair| pair[0] == "id")
+            .and_then(|pair| pair[1].as_str())
+            .expect("owner id")
+            .to_owned()
+    }
+
+    /// Every child frame keyed by its owner element's `id`.
+    pub async fn by_owner(
+        page: &Page,
+        snapshot: &FrameSnapshot,
+    ) -> std::collections::BTreeMap<String, FrameInfo> {
+        let mut named = std::collections::BTreeMap::new();
+        for info in snapshot.frames.iter().filter(|info| info.parent.is_some()) {
+            named.insert(owner_id(page, info).await, info.clone());
+        }
+        named
+    }
+
+    /// The pointer/mouse/click counts and click log a fixture frame recorded
+    /// since the last call, then cleared.
+    pub async fn take_events(
+        page: &Page,
+        info: &FrameInfo,
+    ) -> (serde_json::Map<String, Value>, Vec<Value>) {
+        let text = evaluate_in(
+            page,
+            info,
+            "(() => { const out = JSON.stringify([counts, clicks]); window.counts = {}; window.clicks = []; return out; })()",
+        )
+        .await
+        .expect("frame events");
+        let [counts, clicks]: [Value; 2] =
+            serde_json::from_str(text.as_str().expect("events text")).expect("events JSON");
+        (
+            counts.as_object().expect("counts").clone(),
+            clicks.as_array().expect("clicks").clone(),
+        )
+    }
+
+    /// The handle of the one button named `name` inside `frame`.
+    pub fn button_in(observation: &Observation, name: &str, frame: &FrameId) -> String {
+        let found: Vec<_> = observation
+            .handles()
+            .iter()
+            .filter(|(_, target)| {
+                target.role == "button" && target.name == name && &target.frame == frame
+            })
+            .collect();
+        assert_eq!(
+            found.len(),
+            1,
+            "one button {name:?} in frame {frame:?}:\n{}",
+            observation.text()
+        );
+        found[0].0.to_string()
+    }
+
+    /// A logged click landed inside the clicked element's box at click time.
+    pub fn assert_inside(click: &Value) {
+        let number = |key: &str| click[key].as_f64().expect("numeric click field");
+        let (x, y) = (number("x"), number("y"));
+        assert!(
+            number("left") <= x
+                && x < number("right")
+                && number("top") <= y
+                && y < number("bottom"),
+            "click outside its element: {click}"
+        );
+    }
+
+    /// A logged click landed within `tolerance` CSS px of its element's
+    /// centre: the mapping is exact, not merely inside a large target.
+    pub fn assert_centred(click: &Value, tolerance: f64) {
+        let number = |key: &str| click[key].as_f64().expect("numeric click field");
+        let centre = (
+            (number("left") + number("right")) / 2.0,
+            (number("top") + number("bottom")) / 2.0,
+        );
+        assert!(
+            (number("x") - centre.0).abs() <= tolerance
+                && (number("y") - centre.1).abs() <= tolerance,
+            "click {tolerance} px or more off centre {centre:?}: {click}"
+        );
+    }
 }
 
 /// D04: a same-process iframe is tracked, observed under its `<iframe>` and
@@ -1390,7 +1493,6 @@ mod frames {
 #[tokio::test]
 async fn same_process_frame_is_observable() {
     use aero_cdp::runtime::RuntimeError;
-    use aero_executor::target::GroundingError;
     use serde_json::json;
 
     let _serial = support::serial().await;
@@ -1448,23 +1550,16 @@ async fn same_process_frame_is_observable() {
         .await
         .is_ok()
     );
-    // Acting inside frames is D05: refused before any input.
-    assert_eq!(
-        aero_executor::click_handle(
-            &page,
-            observation.handles(),
-            observation.id(),
-            runtime.epoch(),
-            &handle
-        )
-        .await
-        .err()
-        .map(|error| format!("{error:?}")),
-        Some(format!(
-            "{:?}",
-            aero_executor::ClickError::Grounding(GroundingError::UnsupportedFrame)
-        ))
-    );
+    // D05: a click inside a same-process frame is grounded through its frame.
+    aero_executor::click_handle(
+        &page,
+        observation.handles(),
+        observation.id(),
+        runtime.epoch(),
+        &handle,
+    )
+    .await
+    .expect("a click inside a same-process frame");
 
     // Navigate only the iframe.
     page.evaluate("document.getElementById('inner').src = 'frames-inner2.html'; 1")
@@ -1481,6 +1576,21 @@ async fn same_process_frame_is_observable() {
         main.document
     );
     assert!(after.version > snapshot.version);
+    // The old handle's frame now shows another document: refused before any
+    // input, as a stale document rather than a missing node.
+    assert_eq!(
+        aero_executor::click_handle(
+            &page,
+            observation.handles(),
+            observation.id(),
+            runtime.epoch(),
+            &handle,
+        )
+        .await,
+        Err(aero_executor::ClickError::Grounding(
+            aero_executor::target::GroundingError::StaleDocument
+        ))
+    );
     let error = page
         .frame_call(
             &inner.frame,
@@ -1717,6 +1827,285 @@ async fn nested_oopif_attaches_and_detaches() {
         "{}",
         observation.text()
     );
+
+    drop(page);
+    fixture.shutdown().await.expect("teardown");
+    assert_eq!(support::sandbox_processes(), Vec::<u32>::new());
+}
+
+/// D05: three identically named buttons — the merchant's own, a decoy frame's
+/// (the first frame on the page) and a cross-site payment frame's. Owners are
+/// read from the parent's session, and a click on the payment frame's handle
+/// reaches that button exactly once and nothing else.
+#[cfg(feature = "browser-tests")]
+#[tokio::test]
+async fn two_iframes_map_to_correct_owners() {
+    use aero_executor::TargetRef;
+    use aero_executor::dispatcher::{InputError, type_text};
+    use aero_executor::target::GroundingError;
+
+    let _serial = support::serial().await;
+    let fixture = support::Fixture::start()
+        .await
+        .expect("required native browser fixture failed to start");
+    let runtime = fixture.runtime();
+    let page = frames::open(&fixture, "merchant.html").await;
+    let snapshot = frames::settled(
+        &page,
+        &["/merchant.html", "/merchant-decoy.html", "/gateway.html"],
+    )
+    .await;
+    let main = frames::by_path(&page, &snapshot, "/merchant.html")
+        .await
+        .clone();
+    let decoy = frames::by_path(&page, &snapshot, "/merchant-decoy.html")
+        .await
+        .clone();
+    let gateway = frames::by_path(&page, &snapshot, "/gateway.html")
+        .await
+        .clone();
+    assert_eq!(frames::owner_id(&page, &decoy).await, "decoy");
+    assert_eq!(frames::owner_id(&page, &gateway).await, "gateway");
+    assert!(!decoy.local_root && decoy.session == *page.session());
+    assert!(gateway.local_root && gateway.session != *page.session());
+
+    let observation = frames::observe(&page, "merchant-1").await;
+    let pays = observation
+        .handles()
+        .iter()
+        .filter(|(_, target)| target.role == "button" && target.name == "Pay")
+        .count();
+    assert_eq!(pays, 3, "{}", observation.text());
+    let click = |handle: String| {
+        let page = &page;
+        let observation = &observation;
+        async move {
+            aero_executor::click_handle(
+                page,
+                observation.handles(),
+                observation.id(),
+                runtime.epoch(),
+                &handle,
+            )
+            .await
+        }
+    };
+
+    // The payment frame's button: exactly one click there, nothing elsewhere.
+    click(frames::button_in(&observation, "Pay", &gateway.frame))
+        .await
+        .expect("the gateway's Pay is clicked");
+    let (counts, clicks) = frames::take_events(&page, &gateway).await;
+    assert_eq!(counts, clicks::expected("pay"));
+    assert_eq!(clicks.len(), 1);
+    frames::assert_inside(&clicks[0]);
+    for other in [&main, &decoy] {
+        assert_eq!(
+            frames::take_events(&page, other).await,
+            (Default::default(), vec![])
+        );
+    }
+
+    // The decoy's button: its own frame only.
+    click(frames::button_in(&observation, "Pay", &decoy.frame))
+        .await
+        .expect("the decoy's Pay is clicked");
+    let (counts, clicks) = frames::take_events(&page, &decoy).await;
+    assert_eq!(counts, clicks::expected("pay"));
+    frames::assert_inside(&clicks[0]);
+    for other in [&main, &gateway] {
+        let (counts, clicks) = frames::take_events(&page, other).await;
+        assert!(
+            clicks.is_empty() && !counts.keys().any(|key| key.starts_with("click")),
+            "{counts:?}"
+        );
+    }
+
+    // Typing inside frames is D06: refused before any input.
+    let pay = frames::button_in(&observation, "Pay", &gateway.frame);
+    assert_eq!(
+        type_text(
+            &page,
+            TargetRef {
+                handles: observation.handles(),
+                observation: observation.id(),
+                runtime: runtime.epoch(),
+                handle: &pay,
+            },
+            "x",
+            false,
+            false,
+        )
+        .await,
+        Err(InputError::Grounding(GroundingError::UnsupportedFrame))
+    );
+    assert_eq!(
+        frames::take_events(&page, &gateway).await,
+        (Default::default(), vec![])
+    );
+
+    drop(page);
+    fixture.shutdown().await.expect("teardown");
+    assert_eq!(support::sandbox_processes(), Vec::<u32>::new());
+}
+
+/// D05: page scroll, frame scroll, owner borders and padding, same-process
+/// and cross-site `scale(0.5)` frames, a nested cross-site frame and a target
+/// half outside its frame, at device scale factors 1 and 2. Every click lands
+/// once inside its button (in frame-local coordinates) and nowhere else.
+#[cfg(feature = "browser-tests")]
+#[tokio::test]
+async fn nested_frame_coordinate_calibration() {
+    use serde_json::json;
+
+    let _serial = support::serial().await;
+    let fixture = support::Fixture::start()
+        .await
+        .expect("required native browser fixture failed to start");
+    let runtime = fixture.runtime();
+    let page = frames::open(&fixture, "calibration.html").await;
+    let snapshot = frames::settled(
+        &page,
+        &[
+            "/calibration.html",
+            "/calibration-inner.html",
+            "/calibration-inner.html",
+            "/calibration-inner.html",
+            "/calibration-inner.html",
+            "/calibration-cross.html",
+            "/calibration-edge.html",
+        ],
+    )
+    .await;
+    let main = snapshot.frames[0].clone();
+    let named = frames::by_owner(&page, &snapshot).await;
+    assert_eq!(
+        named.keys().map(String::as_str).collect::<Vec<_>>(),
+        ["clipped", "cross", "leaf", "same", "scaled", "scaledcross"]
+    );
+    for id in ["same", "scaled", "clipped"] {
+        assert_eq!(named[id].session, *page.session(), "{id} is same-process");
+    }
+    for id in ["cross", "scaledcross", "leaf"] {
+        assert!(named[id].local_root, "{id} is out of process");
+    }
+
+    page.evaluate("scrollTo(0, 120)").await.unwrap();
+    for id in ["same", "cross"] {
+        frames::evaluate_in(&page, &named[id], "scrollTo(0, 50)")
+            .await
+            .unwrap();
+    }
+
+    for scale in [1, 2] {
+        if scale == 2 {
+            page.call(
+                "Emulation.setDeviceMetricsOverride",
+                json!({ "width": 1280, "height": 800, "deviceScaleFactor": 2, "mobile": false }),
+            )
+            .await
+            .unwrap();
+            assert_eq!(page.evaluate("devicePixelRatio").await.unwrap(), 2);
+        }
+        let observation = frames::observe(&page, &format!("calibration-{scale}")).await;
+        for id in ["same", "scaled", "clipped", "cross", "scaledcross", "leaf"] {
+            let target = &named[id];
+            let handle = frames::button_in(&observation, "Pay", &target.frame);
+            aero_executor::click_handle(
+                &page,
+                observation.handles(),
+                observation.id(),
+                runtime.epoch(),
+                &handle,
+            )
+            .await
+            .unwrap_or_else(|error| panic!("{id} at scale {scale}: {error:?}"));
+            for (other, info) in named.iter().chain([(&"main".to_owned(), &main)]) {
+                let (counts, clicks) = frames::take_events(&page, info).await;
+                if other == id {
+                    assert_eq!(counts, clicks::expected("pay"), "{id} at scale {scale}");
+                    assert_eq!(clicks.len(), 1, "{id} at scale {scale}");
+                    frames::assert_inside(&clicks[0]);
+                    if id == "clipped" {
+                        // The visible half: left of the 200 px frame's edge.
+                        assert!(clicks[0]["x"].as_f64().unwrap() < 200.0, "{}", clicks[0]);
+                    } else {
+                        // Event coordinates are whole pixels, doubled by a
+                        // scale(0.5) owner.
+                        frames::assert_centred(&clicks[0], 2.0);
+                    }
+                } else {
+                    assert!(
+                        clicks.is_empty() && !counts.keys().any(|key| key.starts_with("click")),
+                        "{id} at scale {scale} also reached {other}: {counts:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    drop(page);
+    fixture.shutdown().await.expect("teardown");
+    assert_eq!(support::sandbox_processes(), Vec::<u32>::new());
+}
+
+/// D05: a rotated same-process frame and a rotated cross-site frame cannot be
+/// mapped and are refused; a cross-site frame under a parent-page overlay is
+/// occluded. No input reaches any frame.
+#[cfg(feature = "browser-tests")]
+#[tokio::test]
+async fn transformed_frame_fails_closed() {
+    use aero_executor::ClickError;
+    use aero_executor::target::GroundingError;
+
+    let _serial = support::serial().await;
+    let fixture = support::Fixture::start()
+        .await
+        .expect("required native browser fixture failed to start");
+    let runtime = fixture.runtime();
+    let page = frames::open(&fixture, "transformed.html").await;
+    let snapshot = frames::settled(
+        &page,
+        &[
+            "/transformed.html",
+            "/calibration-inner.html",
+            "/calibration-inner.html",
+            "/calibration-inner.html",
+        ],
+    )
+    .await;
+    let main = snapshot.frames[0].clone();
+    let named = frames::by_owner(&page, &snapshot).await;
+    assert!(!named["rotated"].local_root);
+    assert!(named["rotatedcross"].local_root && named["covered"].local_root);
+
+    let observation = frames::observe(&page, "transformed-1").await;
+    for (id, expected) in [
+        ("rotated", GroundingError::UnsupportedFrameTransform),
+        ("rotatedcross", GroundingError::UnsupportedFrameTransform),
+        ("covered", GroundingError::Occluded),
+    ] {
+        let handle = frames::button_in(&observation, "Pay", &named[id].frame);
+        assert_eq!(
+            aero_executor::click_handle(
+                &page,
+                observation.handles(),
+                observation.id(),
+                runtime.epoch(),
+                &handle,
+            )
+            .await,
+            Err(ClickError::Grounding(expected)),
+            "{id}"
+        );
+    }
+    for (id, info) in named.iter().chain([(&"main".to_owned(), &main)]) {
+        assert_eq!(
+            frames::take_events(&page, info).await,
+            (Default::default(), vec![]),
+            "{id} received input"
+        );
+    }
 
     drop(page);
     fixture.shutdown().await.expect("teardown");

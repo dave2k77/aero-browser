@@ -1,6 +1,6 @@
 # AeroBrowser — bug, fix, blocker, and decision tracker
 
-Updated 2026-11-10 for the host-migration checkpoint; see the [current evidence record](handoff.md#current-checkpoint--host-migration-and-native-baseline-2026-11-10). This remains the authoritative local issue register. Everything through D04 is committed and pushed (main at ddc1c40); fixes for BUG-001–BUG-005 are in those commits and await owner closure. The remote was created private (DEC-002) but was anonymously readable on 2026-11-10; the owner should confirm the intended visibility. Hosted issue migration, public release and private-evidence publication are not approved. Verify actual remote delivery separately.
+Updated 2026-11-10 for the host-migration checkpoint and D05; see the [host-migration record](handoff.md#previous-checkpoint--host-migration-and-native-baseline-2026-11-10) and the [D05 record](handoff.md#current-checkpoint--d05-frame-aware-grounded-clicks-2026-11-10). This remains the authoritative local issue register. Everything through D04 is committed and pushed (main at ddc1c40); fixes for BUG-001–BUG-005 are in those commits and await owner closure. The remote was created private (DEC-002) but was anonymously readable on 2026-11-10; the owner should confirm the intended visibility. Hosted issue migration, public release and private-evidence publication are not approved. Verify actual remote delivery separately.
 
 Read [the specification](specification.md), [implementation plan](implementation-plan.md), [handoff](handoff.md), and [contribution rules](../CONTRIBUTING.md). Bootstrap code and prerequisite diagnostics now exist. Deliberate TDD red states, missing setup and untested platform assumptions are not disguised as production defects or completed fixes.
 
@@ -75,6 +75,7 @@ The pre-N01 audit reproduced/fixed BUG-001 and three additional CLI issues below
 | BUG-004 | S2 / P2 | ready_for_review | Hermes | Unbounded executable hashing can stall doctor; regular-file/1 GiB/read/deadline limits and regression tests pass. Committed in 8f8b235; not closed. |
 | BUG-005 | S2 / P1 | ready_for_review | Hermes | Configured root viewport only sized the headless window (pages got 1265 × 657); applied per attached page with `Emulation.setDeviceMetricsOverride`; regression assertion in `click_has_one_event_sequence`. Committed in 5c272d5; not closed. |
 | BUG-006 | S2 / P2 | ready_for_review | Hermes | Debug-profile doctor missed its two-second hashing limit on the 300 MB pinned browser, so `scripts/lock-browser.sh` reported FAIL for matching bytes on the native host (fails closed). `sha2` is now built optimized in the dev profile; regression test red then green. Committed 2026-11-10; not closed. |
+| BUG-007 | S3 / P3 | triaged | Unassigned | `Emulation.setDeviceMetricsOverride` on the page session does not reach cross-site out-of-process frames: with device scale factor 2 they keep `devicePixelRatio` 1. Latent: the configured factor is 1 and clicks use CSS pixels; affects any future non-1 factor and frame screenshots. Not fixed. |
 
 #### BUG-001 — B02 action enum accepts positional arrays
 
@@ -133,6 +134,13 @@ The pre-N01 audit reproduced/fixed BUG-001 and three additional CLI issues below
 - Fix: root `Cargo.toml` adds `[profile.dev.package.sha2] opt-level = 3`. The same command then passed in three consecutive runs (0.16–0.17 s); `bash scripts/lock-browser.sh "$AERO_CHROMIUM"` prints PASS and the dev-profile doctor reports `matched_local_pin`. BUG-004's two-second limit and 1 GiB bound are unchanged; `Cargo.lock` is unchanged; release builds were never affected. Workspace gates pass (302 tests, 13 doctests).
 - Limits: this is a timing test. It has a twelvefold margin on this host; on a machine too slow to hash 320 MiB in two seconds it fails, as the real check would. Considered and not done: running the helper in the release profile, or relating the limit to file size.
 - Review/commit: not independently reviewed; committed and pushed on 2026-11-10 at the owner's “yes” (SHA in Git); closure needs the owner or integrating reviewer.
+
+#### BUG-007 — Device scale override does not reach cross-site frames
+
+- Scope/severity: C05 runtime contract (BUG-005's per-page override), S3/P3, latent. `BrowserRuntime::attach` applies the configured viewport with `Emulation.setDeviceMetricsOverride` on the page session only. Out-of-process frames render in their own processes and do not inherit it.
+- Reproduction (D05 spike and `nested_frame_coordinate_calibration`, native host, 2026-11-10): after a page-session override with device scale factor 2, the main frame, same-process frames and a same-site nested leaf report `devicePixelRatio` 2; the cross-site frames report 1.
+- Impact: none on current code. The default factor is 1, and grounded clicks work in CSS pixels; the calibration scenario's clicks land at factor 2. A future non-1 factor would render cross-site frames at the wrong density in screenshots and in anything reading `devicePixelRatio`.
+- Not fixed or regression-tested. A candidate fix applies the same override in each attached out-of-process frame session as the frame manager configures it; whether the browser honours it there is unverified.
 
 ### Environment blockers
 

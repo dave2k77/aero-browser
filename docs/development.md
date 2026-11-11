@@ -134,7 +134,7 @@ ENV-003 now records actual tool availability; this does not establish compatibil
 
 ## Native Ubuntu 26.10 host (2026-11-10)
 
-This is the default development host from 2026-11-10 by the owner's decision; the WSL2 host is no longer available. Observed in `/home/davianc/Documents/projects/aero-browser` at main ddc1c40. The sections above describe the original WSL2 host; this one records what differs. Counts and the full record are in the [handoff](handoff.md#current-checkpoint--host-migration-and-native-baseline-2026-11-10).
+This is the default development host from 2026-11-10 by the owner's decision; the WSL2 host is no longer available. Observed in `/home/davianc/Documents/projects/aero-browser` at main ddc1c40. The sections above describe the original WSL2 host; this one records what differs. Counts and the full record are in the [handoff](handoff.md#previous-checkpoint--host-migration-and-native-baseline-2026-11-10).
 
 - Host: Ubuntu 26.10, kernel 7.3.0-10-generic, x86_64, GNOME on Wayland; GCC 15.3.0-4ubuntu1, Bubblewrap 0.12.0, pkg-config 2.5.1, Python 3.14.9, Node v24.19.0. Not the Ubuntu 24.04 release baseline.
 - Rust: rustup 1.29.2 comes from the snap package, so `cargo`, `rustc` and `rustup` are in `/snap/bin` and the `$HOME/.cargo/bin` PATH line above is not needed. The pinned toolchain was installed with `rustup toolchain install 1.99.1 --profile minimal --component rustfmt,clippy`.

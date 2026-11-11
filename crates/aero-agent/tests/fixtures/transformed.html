@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Transformed frames</title>
+<style>
+body { margin: 0; position: relative; }
+iframe { position: absolute; background: white; border: 0; width: 300px; height: 150px; }
+#rotated { left: 40px; top: 40px; transform: rotate(10deg); }
+#rotatedcross { left: 420px; top: 40px; transform: rotate(10deg); }
+#covered { left: 40px; top: 300px; }
+/* Nearly invisible, but it receives the pointer: a real user would hit it. */
+#cover { position: absolute; left: 40px; top: 300px; width: 300px; height: 150px; background: rgba(0, 0, 0, 0.01); z-index: 5; }
+</style>
+</head>
+<body>
+<iframe id="rotated" title="Rotated" src="calibration-inner.html"></iframe>
+<div id="cover"></div>
+<script>
+for (const id of ["rotatedcross", "covered"]) {
+  const frame = document.createElement("iframe");
+  frame.id = id;
+  frame.title = id;
+  frame.src = `http://localhost:${location.port}/calibration-inner.html`;
+  document.body.appendChild(frame);
+}
+window.counts = {};
+window.clicks = [];
+for (const type of ["pointermove", "pointerdown", "pointerup", "mousemove", "mousedown", "mouseup", "click",
+                    "dblclick", "auxclick", "contextmenu"]) {
+  addEventListener(type, (event) => {
+    const owner = event.target.closest("[id]");
+    const key = type + ":" + (owner ? owner.id : "document");
+    counts[key] = (counts[key] || 0) + 1;
+    if (type === "click" && owner) {
+      const r = owner.getBoundingClientRect();
+      clicks.push({ id: owner.id, x: event.clientX, y: event.clientY,
+                    left: r.left, top: r.top, right: r.right, bottom: r.bottom });
+    }
+  }, true);
+}
+</script>
+</body>
+</html>

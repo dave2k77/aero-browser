@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Offers</title>
+<style>body { margin: 0; } #pay { position: absolute; left: 20px; top: 40px; }</style>
+</head>
+<body>
+<button id="pay">Pay</button>
+<script>
+window.counts = {};
+window.clicks = [];
+for (const type of ["pointermove", "pointerdown", "pointerup", "mousemove", "mousedown", "mouseup", "click",
+                    "dblclick", "auxclick", "contextmenu"]) {
+  addEventListener(type, (event) => {
+    const owner = event.target.closest("[id]");
+    const key = type + ":" + (owner ? owner.id : "document");
+    counts[key] = (counts[key] || 0) + 1;
+    if (type === "click" && owner) {
+      const r = owner.getBoundingClientRect();
+      clicks.push({ id: owner.id, x: event.clientX, y: event.clientY,
+                    left: r.left, top: r.top, right: r.right, bottom: r.bottom });
+    }
+  }, true);
+}
+</script>
+</body>
+</html>
