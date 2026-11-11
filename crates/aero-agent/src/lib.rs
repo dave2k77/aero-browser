@@ -5,6 +5,7 @@ pub mod artifacts;
 pub mod budget;
 pub mod capabilities;
 pub mod config;
+pub mod controller;
 pub mod data_flow;
 pub mod evidence;
 pub mod policy;

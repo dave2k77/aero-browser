@@ -103,6 +103,16 @@ impl Store {
         sql(tx.commit())
     }
 
+    /// Mark every unconsumed approval of the run consumed: the page may
+    /// have changed under manual input since they were issued.
+    pub(super) fn void_run_approvals(&mut self, context: &RunContext) -> Result<(), StoreError> {
+        sql(self.connection.execute(
+            "UPDATE approvals SET consumed=1 WHERE session_id=?1 AND task_id=?2 AND consumed=0",
+            params![context.run_id.as_str(), context.task_id.as_str()],
+        ))?;
+        Ok(())
+    }
+
     pub(super) fn consume_approval(
         &mut self,
         id: String,

@@ -30,6 +30,15 @@ pub enum VerificationStatus {
     Inconclusive,
 }
 
+/// Who may send input to the run's browser (E02).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum InputOwner {
+    Automation,
+    /// A trusted human after an acknowledged takeover.
+    Human,
+}
+
 strict_tagged_object! {
     #[derive(Eq)]
     pub enum EventKind {
@@ -43,6 +52,9 @@ strict_tagged_object! {
             step: u64,
             dispatch_state: DispatchState,
             verification_status: VerificationStatus,
+        },
+        InputOwnerChanged {
+            owner: InputOwner,
         },
     }
     tag "event";
@@ -89,8 +101,8 @@ impl PublicEvent {
                     "an uncertain effect cannot be reported as passed",
                 )?;
             }
-            // A status report does not perform the represented state transition.
-            EventKind::StatusChanged { .. } => {}
+            // A status or ownership report does not perform the transition.
+            EventKind::StatusChanged { .. } | EventKind::InputOwnerChanged { .. } => {}
         }
         Ok(())
     }
@@ -116,7 +128,15 @@ mod tests {
 
     #[test]
     fn public_event_version_and_every_kind_round_trip() {
-        let mut kinds = vec![EventKind::UsageUpdated { usage: usage() }];
+        let mut kinds = vec![
+            EventKind::UsageUpdated { usage: usage() },
+            EventKind::InputOwnerChanged {
+                owner: InputOwner::Automation,
+            },
+            EventKind::InputOwnerChanged {
+                owner: InputOwner::Human,
+            },
+        ];
         for status in [
             RunStatus::Running,
             RunStatus::AwaitingUser,

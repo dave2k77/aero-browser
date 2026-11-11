@@ -383,6 +383,11 @@ impl JournalClient {
     ) -> Result<Reply<Result<(), crate::approval::Refusal>>, StoreError> {
         self.submit(move |s| s.consume_approval(id, current))
     }
+    /// Via `Capabilities` only (E02): after manual input.
+    pub(crate) fn void_run_approvals(&self, context: RunContext) -> Result<Reply<()>, StoreError> {
+        context_valid(&context)?;
+        self.submit(move |s| s.void_run_approvals(&context))
+    }
     /// Via `Capabilities` only (N06).
     pub(crate) fn authorize_effect(
         &self,

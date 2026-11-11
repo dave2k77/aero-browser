@@ -111,6 +111,13 @@ impl Capabilities {
     pub(crate) fn private_network(&self) -> bool {
         self.network == NetworkAccess::PrivateNetwork
     }
+    /// Void the run's unconsumed approvals (E02, after manual input).
+    pub(crate) fn void_run_approvals(
+        &self,
+        context: aero_core::checkpoint::RunContext,
+    ) -> Result<Reply<()>, StoreError> {
+        self.journal.void_run_approvals(context)
+    }
     /// Consume approval `id` for `current` (N07); see `approval`.
     pub(crate) fn consume(
         &self,

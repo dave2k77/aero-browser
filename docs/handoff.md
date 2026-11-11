@@ -1,6 +1,56 @@
 # AeroBrowser — implementation handoff
 
-Document-set revision: 2.40. Current checkpoint: [critical-path slice 2](#current-checkpoint--critical-path-slice-2-n07-previews-approvals-and-the-e01-gate-2026-11-10) (N07 previews, approvals and the E01 gate), committed and pushed on 2026-11-10 at the owner’s “commit and push, then begin part 3” (take the SHA from Git); not independently reviewed. Slice 1 (de92705) and D05 (90d904a) are committed and pushed. Prior checkpoints below are historical where their next actions or test counts differ.
+Document-set revision: 2.41. Current checkpoint: [critical-path slice 3a](#current-checkpoint--critical-path-slice-3a-e02-controller-2026-11-10) (E02 controller), committed and pushed on 2026-11-10 at the owner’s “commit and push, then proceed” (take the SHA from Git); N08 is in progress. Slices 1–2 (de92705, 5b856a4) and D05 (90d904a) are committed and pushed. Prior checkpoints below are historical where their next actions or test counts differ.
+
+## Current checkpoint — critical-path slice 3a: E02 controller (2026-11-10)
+
+Implements the E02 half of the [approved slice 3 record](#critical-path-planning-record--slice-3-e02-controller-then-n08-service-approved-2026-11-10). Committed and pushed on 2026-11-10 as `feat(agent): serialize task control and takeover`; take the SHA from Git.
+
+Changed:
+
+- `crates/aero-agent/src/controller.rs`: `Controller::spawn(context, automation, guard)` runs one actor task per run; the cloneable handle offers `start`, `pause`, `resume`, `cancel`, `takeover`, `release`, `reply`, `approve`, `snapshot` and `subscribe`, each returning once the command has taken effect. The actor drives an `Automation` (`plan`, `dispatch`, `verify`, `answer`, `invalidate_observations`) and is its only dispatch caller. Planning and verification futures are dropped on pause, cancel or takeover; an in-flight dispatch gets `INPUT_GRACE` (500 ms) and is then dropped and published as `Uncertain`; commands queued before a dispatch are applied first, so none starts after a pause. Takeover pauses and returns a `HumanInput` token (not `Clone`, bound to its controller); `release` needs that token; the first `resume` after manual input voids the run's approvals through `RunGuard` and invalidates observations, and stays paused if voiding fails. `Plan::AwaitUser` sets `awaiting_user` until `reply`/`approve`; `Plan::Complete` ends the run `completed` (a proposal; verification is separate). Every status and owner change is a gapless `PublicEvent`; `snapshot` gives status, owner and last sequence for resynchronising. If every handle is dropped the run is cancelled and the actor ends.
+- `RunGuard` is implemented for `Capabilities` by a new journal operation that marks the run's unconsumed approvals consumed (`void_run_approvals`).
+- `aero-core::events`: `InputOwner` and `EventKind::InputOwnerChanged` (unshipped wire schema, extended in place).
+- `aero-agent` now enables Tokio's `rt`, `time` and `macros` features; tests add `test-util` for paused time.
+
+Evidence:
+
+- Red first: the six controller tests failed against a stub actor that acknowledged every command; `manual_input_voids_outstanding_approvals` failed against a no-op journal operation. Added after the implementation: `no_dispatch_starts_after_a_requested_pause` (delivers a pause and the end of planning in the same poll, 32 times, with the 500 ms constant pinned) and a reply-while-paused refusal.
+- Tests (`tests/controller.rs`, paused Tokio time, a fake automation): `controller_pause_is_acknowledged` (planning: at once; input: when it finishes, 150 ms later; hanging input: at exactly 500 ms, uncertain and dropped; nothing dispatched afterwards), `controller_cancel_interrupts_wait` (verification and planning at once; a cancelled run refuses every command), `controller_double_start_is_rejected`, `controller_waits_for_the_user`, `controller_takeover_has_single_input_owner` (no dispatch while the human owns input; other controllers' tokens refused; resume voids and re-observes once; a plain pause/resume does not), `a_failed_void_keeps_the_run_paused`, `no_dispatch_starts_after_a_requested_pause`.
+- Green: 20 consecutive runs of the controller suite; fmt; clippy `-D warnings` with and without `aero-agent/browser-tests`; workspace 366 passed.
+- Mutation (throwaway script, 120 s cap per run): 18 of 18 killed, one by hanging the test (no grace deadline).
+
+Limits: nothing real drives it yet (E05 implements `Automation` over the gate and executor); status is in memory only (E07/N09); dropping a dispatch future after the grace period abandons whatever the executor was doing, which is why it is reported uncertain rather than retried; a run whose handles are all dropped is cancelled; not independently reviewed.
+
+Next: N08.
+
+## Critical-path planning record — slice 3: E02 controller, then N08 service (approved 2026-11-10)
+
+Slice 2 was committed and pushed as 5b856a4 at the owner's “commit and push, then begin part 3.” This slice is E02 (plan row) followed by N08 (Batch N section, §7.11). Pure async code with fakes and the journal; no browser spike needed. E02 is implemented and offered for commit before N08 starts.
+
+What exists: `RunStatus` and `PublicEvent`/`EventKind` (`StatusChanged`, `UsageUpdated`, `StepOutcome`) in `aero-core::events`; trusted-user and model-scoped `TaskClient`s; `TaskAuthority::capabilities` and the slice 2 gate; the journal's run records (new runs start `paused`) and the B06 task lease (one controller per task). There is no controller, planner or executor loop.
+
+Approved by the owner’s “approved.” as proposed: the controller keeps run status in memory.
+
+E02 proposal — `crates/aero-agent/src/controller.rs`:
+
+1. One controller task per run, driven by typed commands over a channel: `Start`, `Pause`, `Resume`, `Cancel`, `Takeover`, `Release`, `Approve`, `Reply`; each is acknowledged once it has taken effect. One active run per controller; a second `Start` is rejected.
+2. The controller drives an `Automation` trait: `plan` (cancellable), `dispatch` (one bounded input sequence; returns dispatched, not dispatched or uncertain), `verify` (cancellable, read-only), and `invalidate_observations`. The real implementation (gate, executor, planner) is E05; tests use a fake with paused Tokio time. The controller never dispatches except through `Automation::dispatch`, and only while it owns input and no pause or cancel is pending.
+3. Pause: a planning or read-only wait is dropped at once and the pause acknowledged; an in-flight input sequence is allowed to finish for up to 500 ms, after which it is recorded as uncertain and the pause acknowledged; no dispatch starts after a pause is requested. Never waits on a 90 s planner timeout. Cancel: the same interruption, then the run ends `cancelled`.
+4. Takeover: implies pause; once acknowledged, the human holds exclusive input ownership (a non-cloneable `HumanInput` token) and automation cannot start or resume. `Release` returns the run to paused. `Resume` after a takeover first invalidates old observations (handles) and voids the run's unconsumed approvals through a new journal operation, so automation re-observes what the user left.
+5. Status and ownership changes are published as `PublicEvent`s with gapless sequence numbers; `aero-core::events` gains `InputOwnerChanged`. Decision needed: the controller keeps run status in memory and publishes events; persisting status transitions, the journal flush on close and Ctrl+C wiring stay with E07/N09. Recommendation: accept, so E02 stays pure and testable.
+6. Tests, red against stubs first: `controller_pause_is_acknowledged` (during planning: immediately; during input: after it finishes; input that hangs: at 500 ms, marked uncertain; no later dispatch), `controller_cancel_interrupts_wait`, `controller_double_start_is_rejected`, `controller_takeover_has_single_input_owner` (no automation dispatch while the human owns input; resume re-observes and voids approvals).
+
+N08 proposal — `crates/aero-agent/src/service/{mod.rs,local.rs}`, `tests/service.rs`:
+
+7. One in-process `SessionService` over the controller and journal, with host-constructed caller capabilities (trusted user; model scoped to one task), no network socket or daemon. Methods per §7.11. Those with no backend yet return `Unsupported` rather than pretend: `observe`, `propose_action` (until E05) and `get_recovery_report` (F08). `request_approval` from a model records a pending request the trusted user can grant; only `grant_approval` from a trusted caller creates an approval.
+8. Every task/run lookup checks the caller's scope; a model cannot revise the contract, grant, approve, or reach another task.
+9. Events: subscribers (CLI and GUI) see one sequence; a subscriber that falls behind gets an explicit gap and resynchronises from a snapshot (status, input owner, last sequence) instead of silently missing events.
+10. Tests, red first: shared task/run/event sequence for two trusted clients; model role denials; duplicate start; reconnect after an event gap; resume after manual ownership takes a fresh observation and invalidates approvals.
+
+Not in this slice: real planner/executor wiring (E03–E05), durable status and close policy (E07, N09), recovery reports (F08).
+
+Commits per plan rows: `feat(agent): serialize task control and takeover` (E02), then `refactor(control): share one role-scoped application interface` (N08).
 
 ## Current checkpoint — critical-path slice 2: N07 previews, approvals and the E01 gate (2026-11-10)
 

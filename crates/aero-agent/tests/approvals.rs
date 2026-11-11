@@ -1031,3 +1031,30 @@ async fn expired_approvals_and_ended_runs_are_refused() {
     );
     assert_eq!(setup.dispatcher.count(), 0);
 }
+
+#[tokio::test]
+async fn manual_input_voids_outstanding_approvals() {
+    use aero_agent::controller::RunGuard;
+    let setup = Setup::new().await;
+    setup.approve("order", preview()).await.unwrap();
+    setup.approve("other", preview()).await.unwrap();
+    // What the controller does on the first resume after a takeover.
+    setup
+        .capabilities()
+        .void_approvals(&context("run-1", 1))
+        .await
+        .unwrap();
+    for id in ["order", "other"] {
+        assert_eq!(
+            setup.commit(Some(id), preview()).await,
+            Seen::Refused(Refusal::Consumed),
+            "{id}"
+        );
+    }
+    // Approvals issued after the user hands input back work as usual.
+    setup.approve("fresh", preview()).await.unwrap();
+    assert_eq!(
+        setup.commit(Some("fresh"), preview()).await,
+        by_approval("fresh")
+    );
+}
