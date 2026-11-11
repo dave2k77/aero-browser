@@ -1,6 +1,7 @@
 //! Pure versioned domain contracts. No browser, storage, or provider runtime.
 
 pub mod actions;
+pub mod capability;
 pub mod checkpoint;
 pub mod events;
 pub mod form;

@@ -630,7 +630,7 @@ fn origin_shape(origin: &str) -> bool {
     })
 }
 
-fn route_shape(path: &str) -> bool {
+pub(crate) fn route_shape(path: &str) -> bool {
     path.len() <= 2048
         && path.starts_with('/')
         && !path.contains("//")

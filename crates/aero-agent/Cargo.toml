@@ -22,6 +22,9 @@ serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
 sha2.workspace = true
+url.workspace = true
+# Not used directly: selects url's IDNA backend (see the workspace manifest).
+idna_adapter.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

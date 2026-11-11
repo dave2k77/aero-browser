@@ -32,6 +32,10 @@ sha2 = "0.10"
 tempfile = "3"
 tokio = { version = "1.54.1", default-features = false, features = ["sync"] }
 tokio-tungstenite = { version = "0.30.0", default-features = false, features = ["connect"] }
+url = "2.5"
+# Pins url's IDNA backend to unicode-rs (14 crates) instead of the ICU4X default
+# (47); non-ASCII host names still parse. Owner decision, 2026-11-10.
+idna_adapter = "~1.1"
 
 # BUG-006: doctor hashes the pinned browser executable (about 300 MB) under a
 # two-second deadline. Unoptimized SHA-256 cannot do that, so the dev profile

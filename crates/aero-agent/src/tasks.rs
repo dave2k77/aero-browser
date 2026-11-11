@@ -21,10 +21,12 @@
 //! }
 //! ```
 
+use crate::capabilities::{Capabilities, NetworkAccess};
 use crate::config::PrivateState;
 use crate::data_flow::{GatewayHost, GatewayLink};
 use crate::store::StoreError;
 use crate::store::worker::{AuditPage, Journal, JournalClient, Reply, ResumeState};
+use aero_core::capability::CapabilityGrant;
 use aero_core::checkpoint::RunContext;
 use aero_core::ids::TaskId;
 use aero_core::task::{MAX_REFERENCE_BYTES, StartPrerequisites, TaskContract};
@@ -169,6 +171,11 @@ impl TaskAuthority {
         }
         Ok(keys.len())
     }
+    /// The host's pre-dispatch authorization handle (N06). Never give it to a
+    /// model adapter: it consumes grant quota.
+    pub fn capabilities(&self, network: NetworkAccess) -> Capabilities {
+        Capabilities::new(self.journal.clone(), network)
+    }
     /// Host-selected task scope. An ID does not authenticate a remote requester.
     pub fn model_for_task(&self, task_id: TaskId) -> Result<TaskClient, StoreError> {
         if task_id.as_str().trim().is_empty()
@@ -189,7 +196,8 @@ enum Access {
     Model(TaskId),
 }
 /// A fixed host-issued access scope. No Serialize/Deserialize/Debug, raw-client
-/// getter, role setter, authority factory, grant or completion method is exposed.
+/// getter, role setter, authority factory or completion method is exposed;
+/// grant issue and revocation (N06) refuse a model-scoped client.
 /// Scope is journal + stable TaskId, not a user/revision/run or revocable login.
 /// Do not reuse a delegated TaskId for unrelated work: delete/recreate in the
 /// same journal lifetime would reuse that scope. Journal close ends admission.
@@ -244,6 +252,19 @@ impl TaskClient {
     pub fn release_hold(&self, task: TaskId, hold: String) -> Result<Reply<()>, StoreError> {
         self.require_owner()?;
         self.journal.release_hold(task, hold)
+    }
+    /// Issue a bounded delegation envelope (N06). Trusted user only; the
+    /// grant must lie within the task's current contract revision and be
+    /// unexpired. Its payload is immutable once issued.
+    pub fn issue_grant(&self, grant: CapabilityGrant) -> Result<Reply<()>, StoreError> {
+        self.require_owner()?;
+        self.journal.issue_grant(grant, "trusted_user")
+    }
+    /// Revoke a live grant (N06). Trusted user only. A contract revision
+    /// revokes all of the task's grants.
+    pub fn revoke_grant(&self, task: TaskId, id: String) -> Result<Reply<()>, StoreError> {
+        self.require_owner()?;
+        self.journal.revoke_grant(task, id)
     }
     /// Task-scoped data. The host must still apply privacy/data-flow policy before
     /// sending private intent/history to a provider or another recipient.

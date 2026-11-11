@@ -8,11 +8,14 @@ use super::{Store, StoreError, database_error};
 use crate::budget::{BudgetRequest, BudgetSnapshot, BudgetTicket, Charges};
 #[path = "budget_store.rs"]
 mod budget_store;
+#[path = "grant_store.rs"]
+mod grant_store;
 use aero_core::actions::Decision;
 use aero_core::checkpoint::{CumulativeUsage, MAX_COUNTER, RunContext, RunStatus};
 use aero_core::events::{DispatchState, VerificationStatus};
 use aero_core::ids::{ArtifactId, EvidenceId, TaskId};
 use aero_core::task::{ProcessingMode, StartPrerequisites, TaskContract};
+pub use grant_store::MAX_LIVE_GRANTS;
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::path::Path;
@@ -341,6 +344,34 @@ impl JournalClient {
         identifier(task_id.as_str())?;
         identifier(&hold)?;
         self.submit(move |s| release_hold(&s.connection, &task_id, &hold))
+    }
+    /// Owner-only via `TaskClient` (N06).
+    pub(crate) fn issue_grant(
+        &self,
+        grant: aero_core::capability::CapabilityGrant,
+        issuer: &'static str,
+    ) -> Result<Reply<()>, StoreError> {
+        identifier(grant.task_id.as_str())?;
+        self.submit(move |s| s.issue_grant(grant, issuer))
+    }
+    /// Owner-only via `TaskClient` (N06).
+    pub(crate) fn revoke_grant(
+        &self,
+        task_id: TaskId,
+        id: String,
+    ) -> Result<Reply<()>, StoreError> {
+        identifier(task_id.as_str())?;
+        identifier(&id)?;
+        self.submit(move |s| s.revoke_grant(&task_id, &id))
+    }
+    /// Via `Capabilities` only (N06).
+    pub(crate) fn authorize_effect(
+        &self,
+        effect: crate::capabilities::ResolvedEffect,
+        allow_private_network: bool,
+    ) -> Result<Reply<crate::capabilities::Authorization>, StoreError> {
+        identifier(effect.task_id.as_str())?;
+        self.submit(move |s| s.authorize_effect(effect, allow_private_network))
     }
 }
 
