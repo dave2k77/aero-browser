@@ -1,6 +1,26 @@
 # AeroBrowser — implementation handoff
 
-Document-set revision: 2.41. Current checkpoint: [critical-path slice 3a](#current-checkpoint--critical-path-slice-3a-e02-controller-2026-11-10) (E02 controller), committed and pushed on 2026-11-10 at the owner’s “commit and push, then proceed” (take the SHA from Git); N08 is in progress. Slices 1–2 (de92705, 5b856a4) and D05 (90d904a) are committed and pushed. Prior checkpoints below are historical where their next actions or test counts differ.
+Document-set revision: 2.42. Current checkpoint: [critical-path slice 3b](#current-checkpoint--critical-path-slice-3b-n08-service-2026-11-10) (N08 service), committed and pushed on 2026-11-10 at the owner’s “commit and push. we'll stop here for today.” (take the SHA from Git); not independently reviewed. The session ended there; next session starts with the slice 4 planning record (N14, N22, F01). E02 (bbb96a4), slices 1–2 (de92705, 5b856a4) and D05 (90d904a) are committed and pushed. Prior checkpoints below are historical where their next actions or test counts differ.
+
+## Current checkpoint — critical-path slice 3b: N08 service (2026-11-10)
+
+Implements the N08 half of the [approved slice 3 record](#critical-path-planning-record--slice-3-e02-controller-then-n08-service-approved-2026-11-10). Committed and pushed on 2026-11-10 as `refactor(control): share one role-scoped application interface`; take the SHA from Git.
+
+Changed:
+
+- `crates/aero-agent/src/service/{mod.rs,local.rs}`: `LocalService::new(journal, factory, network)` (host-only) mints `Session`s: `trusted()` for the CLI/desktop and `model(task)` for a model adapter; the role is a private field (compile-fail doctest). Methods per §7.11: `create_task`, `revise_contract` (also pauses the task's runs), `start_run` (journal record, cancels the task's earlier controllers, spawns and starts a controller with the factory's automation and `Capabilities` as its guard), `observe`/`propose_action`/`get_recovery_report` (scope-checked, then `Unsupported`), `pause` (any caller in scope), `resume`/`cancel`/`takeover`/`release`/`reply_user` (trusted), `request_approval` (any caller in scope; the preview's task must match its run; stored as a pending request, at most 256), `grant_approval` (trusted; approves the pending preview through the journal and hands the approval to a run awaiting it; a refused grant leaves the request pending), `list_artifacts`, `get_evidence`, `snapshot` and `subscribe`. A model asking about another task gets `NotFound`; trusted-only methods give it `PermissionDenied` before any lookup. `AutomationFactory` supplies each run's `Automation` (E05 provides the real one).
+- `EventStream::next` yields events, or an explicit `Gap(snapshot)` when the subscriber fell behind; it then re-subscribes before taking the snapshot and skips events the snapshot already covers.
+
+Evidence:
+
+- Red first: the seven initial service tests failed against stubs (every method `Unsupported`, so all at setup). The gap test then found a real defect in the first implementation: after a lag the old receiver kept pointing into the overwritten buffer and reported a second gap; fixed by subscribing afresh before the snapshot. Added after the first mutation pass: the cross-task preview, refused-grant retry, revision-pauses-runs, approval-resumes-waiting-run and covered-events cases.
+- Tests (`tests/service.rs`, a fake automation and a real journal): `trusted_clients_share_one_run_and_event_sequence`, `model_role_is_scoped_to_its_task`, `only_trusted_callers_grant_requested_approvals`, `duplicate_start_is_rejected`, `reconnect_after_event_gap`, `resume_after_manual_input_reobserves_and_voids_approvals`, `methods_without_a_backend_say_so`, `revising_the_contract_pauses_the_task_runs`, `granting_an_approval_resumes_a_waiting_run`, `a_gap_snapshot_is_not_followed_by_events_it_already_covers`.
+- Green: fmt; clippy `-D warnings` with and without `aero-agent/browser-tests`; workspace 377 passed.
+- Mutation (throwaway script, 120 s cap per run): 15 of 15 killed, one by hanging the test (earlier runs left running).
+
+Limits: no planner/executor behind `observe`/`propose_action` (E05) and no recovery report (F08); pending approval requests and the run table live in memory and are lost on restart (run status persistence is E07/N09); finished runs stay in the table for the process lifetime; caller authentication is the host's (sessions are handed out in-process; no socket); not independently reviewed.
+
+Next session: sync (`git fetch`; remote is HTTPS via the `gh` login), `export TMPDIR="$PWD/target/aero-test-tmp"; source scripts/dev-env.sh`, re-run the gates, then write the slice 4 planning record (N14 processing modes, N22 evaluation structure, F01 redaction guard) for owner approval. Open owner questions are unchanged: public repository visibility, the Ubuntu 24.04 release baseline, DEC-012/DEC-013, closing BUG-001–006, a git identity in config.
 
 ## Current checkpoint — critical-path slice 3a: E02 controller (2026-11-10)
 
@@ -22,7 +42,7 @@ Evidence:
 
 Limits: nothing real drives it yet (E05 implements `Automation` over the gate and executor); status is in memory only (E07/N09); dropping a dispatch future after the grace period abandons whatever the executor was doing, which is why it is reported uncertain rather than retried; a run whose handles are all dropped is cancelled; not independently reviewed.
 
-Next: N08.
+Next: N08 (see the slice 3b checkpoint).
 
 ## Critical-path planning record — slice 3: E02 controller, then N08 service (approved 2026-11-10)
 

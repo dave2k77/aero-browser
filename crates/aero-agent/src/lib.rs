@@ -11,6 +11,7 @@ pub mod evidence;
 pub mod policy;
 pub mod preview;
 pub mod retention;
+pub mod service;
 pub mod store;
 pub mod tasks;
 pub mod verification;
